@@ -560,7 +560,7 @@ h1{font-size:clamp(28px,4.4vw,40px)}
       if (fs && fs !== "open" && l.status !== fs) return false;
       if (needContact && !i.c.phones.length && !i.c.emails.length && !i.c.social.length) return false;
       if (onlyNew && !isFresh(l)) return false;
-      if (q && (i.name + " " + i.kind + " " + i.addr + " " + i.zone + " " + (l.note || "")).toLowerCase().indexOf(q) < 0) return false;
+      if (q && (i.name + " " + i.kind + " " + i.addr + " " + (i.addrGuess || "") + " " + i.zone + " " + (l.note || "")).toLowerCase().indexOf(q) < 0) return false;
       return true;
     }).sort(function (a, b) {
       var order = { interesse: 0, contacte: 1, nouveau: 2, refus: 3, asite: 4 };
@@ -579,11 +579,11 @@ h1{font-size:clamp(28px,4.4vw,40px)}
     var mails = i.c.emails.map(function (e) { return '<a class="ct" href="mailto:' + esc(e) + '">' + esc(e) + "</a>"; }).join("");
     var social = i.c.social.map(function (s) { return '<a class="ct" href="' + esc(s.url) + '" target="_blank" rel="noopener">' + s.kind + "</a>"; }).join("");
     var none = phones || mails || social ? "" : '<span class="ct none">Pas de contact sur la carte : cherche sur Google</span>';
-    var gq = encodeURIComponent(i.name + " " + (i.addr ? i.addr : i.zone));
+    var gq = encodeURIComponent(i.name + " " + (i.addr || i.addrGuess || i.zone));
     return '<article class="panel lead' + (l.status === "refus" || l.status === "asite" ? " is-done" : "") + '" data-id="' + esc(l.id) + '">' +
       '<div class="lead-main">' +
         '<h2 class="lead-name">' + esc(i.name) + "</h2>" +
-        '<div class="meta"><span class="pill">' + esc(i.kind) + "</span><span>" + esc(i.addr || "Adresse non indiquée") + "</span><span>" + esc(i.zone) + "</span>" +
+        '<div class="meta"><span class="pill">' + esc(i.kind) + "</span><span data-addr=\"" + esc(l.id) + "\">" + addrText(l) + "</span><span>" + esc(i.zone) + "</span>" +
           (isNew ? '<span class="pill new">Nouveau · ' + esc(ago(l.firstSeen)) + "</span>" : "") +
           (l.gone ? '<span class="pill gone">Plus sur la carte au dernier scan</span>' : "") +
           (l.auto ? '<span class="pill gone">' + esc(l.auto) + "</span>" : "") + "</div>" +
@@ -602,6 +602,36 @@ h1{font-size:clamp(28px,4.4vw,40px)}
       "</select></div>" +
       '<div class="note"><textarea placeholder="Note : appelé le…, rappeler…, prix proposé…" aria-label="Note sur ' + esc(i.name) + '">' + esc(l.note || "") + "</textarea></div>" +
     "</article>";
+  }
+  /* Adresse : celle de la carte, sinon on la retrouve à partir de la position (une demande par seconde, mise en mémoire). */
+  var geoQueue = [], geoBusy = false;
+  function addrText(l) {
+    var i = l.info;
+    if (i.addr) return esc(i.addr);
+    if (i.addrGuess) return esc(i.addrGuess) + ' <small title="Adresse retrouvée à partir de la position sur la carte">(environ)</small>';
+    if (i.lat && i.lon && !i.addrFail) { if (geoQueue.indexOf(l.id) < 0) geoQueue.push(l.id); setTimeout(geoNext, 0); return "Recherche de l'adresse…"; }
+    return "Adresse inconnue";
+  }
+  function geoNext() {
+    if (geoBusy || !geoQueue.length) return;
+    var l = store.leads[geoQueue.shift()];
+    if (!l || !l.info || l.info.addr || l.info.addrGuess) return geoNext();
+    geoBusy = true;
+    fetch("https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=18&addressdetails=1&accept-language=fr&lat=" + l.info.lat + "&lon=" + l.info.lon)
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        var a = (j && j.address) || {};
+        var street = [a.road || a.pedestrian || a.square || "", a.house_number || ""].filter(Boolean).join(" ");
+        var city = [a.postcode || "", a.town || a.city || a.village || a.municipality || ""].filter(Boolean).join(" ");
+        var txt = [street, city].filter(Boolean).join(", ");
+        if (txt) l.info.addrGuess = txt; else l.info.addrFail = true;
+      }, function () { l.info.addrFail = true; })
+      .then(function () {
+        clearTimeout(save.t); save.t = setTimeout(save, 800);
+        var el = document.querySelector('[data-addr="' + l.id + '"]');
+        if (el) el.innerHTML = addrText(l);
+        setTimeout(function () { geoBusy = false; geoNext(); }, 1100);
+      });
   }
   function isFresh(l) { return !!l.fresh && Date.now() - l.firstSeen < 7 * DAY; }
 
@@ -709,7 +739,7 @@ h1{font-size:clamp(28px,4.4vw,40px)}
     var head = ["Nom", "Type", "Adresse", "Commune", "Région", "Site actuel", "Défauts du site", "Téléphones", "WhatsApp probable", "E-mails", "Réseaux sociaux", "Suivi", "Note", "Trouvé le", "Lien Google Maps"];
     var lines = [head].concat(rows.map(function (l) {
       var i = l.info, st = STATUS.filter(function (s) { return s[0] === l.status; })[0];
-      return [i.name, i.kind, i.addr, i.zone, i.region, i.site || "", siteFlags(l).map(function (f) { return f.t; }).join(" / "),
+      return [i.name, i.kind, i.addr || i.addrGuess || "", i.zone, i.region, i.site || "", siteFlags(l).map(function (f) { return f.t; }).join(" / "),
         i.c.phones.map(function (p) { return prettyPhone(p.num); }).join(" / "),
         i.c.phones.filter(function (p) { return p.mobile || p.wa; }).map(function (p) { return prettyPhone(p.num); }).join(" / "),
         i.c.emails.join(" / "), i.c.social.map(function (s) { return s.url; }).join(" / "),
