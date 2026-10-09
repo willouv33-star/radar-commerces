@@ -653,19 +653,19 @@ h1{font-size:clamp(28px,4.4vw,40px)}
     if (/(facebook\.com|fb\.me|instagram\.com|linktr\.ee)/i.test(u)) return "votre présence en ligne passe surtout par une page Facebook ou Instagram, qui ressort beaucoup moins bien sur Google qu'un vrai site";
     if (LISTINGS.test(u)) return "votre lien internet mène vers une fiche d'annuaire plutôt que vers votre propre site";
     var p = l.psi;
-    if (p && !p.error && p.mobile === 0) return "votre site ne s'affiche pas bien sur téléphone, alors que la plupart des clients vous cherchent depuis leur GSM";
-    if (p && !p.error && p.perf != null && p.perf < 0.5) return "votre site met du temps à s'ouvrir sur téléphone, et beaucoup de visiteurs partent avant qu'il soit chargé";
+    if (p && !p.error && p.mobile === 0) return "votre site s'affiche mal sur certains écrans";
+    if (p && !p.error && p.perf != null && p.perf < 0.5) return "votre site met du temps à s'ouvrir, et beaucoup de visiteurs partent avant qu'il soit chargé";
     if (BUILDERS.test(u)) return "votre site est fait sur une plateforme gratuite, ce qui donne souvent une adresse peu professionnelle et parfois de la publicité";
     if (/^http:\/\//i.test(u)) return "votre site ne semble pas sécurisé (pas de cadenas dans la barre d'adresse), ce qui peut inquiéter certains visiteurs";
-    return "votre site pourrait être plus moderne et plus agréable à utiliser sur téléphone";
+    return "votre site pourrait être plus moderne et plus agréable à utiliser";
   }
   function subjectFor(l) { return (l.info.site ? "Un nouveau site pour " : "Un site internet pour ") + l.info.name; }
   function msgFor(l) {
     var name = l.info.name;
     var intro = "Bonjour, je m'appelle Augustin, j'habite à Rhode-Saint-Genèse et je crée des sites internet pour les commerces de la région.";
     var end = "Je vous propose de vous préparer une première version gratuitement et sans engagement, pour que vous puissiez voir le résultat avant de décider.\n\nSi ça ne vous intéresse pas, pas de souci : dites-le-moi simplement et je ne vous relancerai pas.\n\nBonne journée,\nAugustin";
-    if (!l.info.site) return intro + "\n\nJ'ai vu que " + name + " n'a pas encore de site internet. Aujourd'hui, la plupart des clients cherchent sur Google avant de se déplacer, et sans site ils tombent souvent sur un concurrent.\n\nJe peux vous créer un site moderne, adapté au téléphone, avec vos horaires, vos photos et un bouton pour vous contacter. Vous pourrez ensuite modifier vous-même les textes et les photos très facilement.\n\n" + end;
-    return intro + "\n\nJ'ai regardé le site de " + name + " : " + flawPhrase(l) + ". C'est dommage, parce que beaucoup de clients se font une idée d'un commerce sur son site avant de venir.\n\nJe peux vous créer un nouveau site, moderne et rapide, pensé d'abord pour le téléphone. Vous pourrez ensuite modifier vous-même les textes et les photos très facilement.\n\n" + end;
+    if (!l.info.site) return intro + "\n\nJ'ai vu que " + name + " n'a pas encore de site internet. Aujourd'hui, la plupart des clients cherchent sur Google avant de se déplacer, et sans site ils tombent souvent sur un concurrent.\n\nJe peux vous créer un site moderne, avec vos horaires, vos photos et un bouton pour vous contacter. Vous pourrez ensuite modifier vous-même les textes et les photos très facilement.\n\n" + end;
+    return intro + "\n\nJ'ai regardé le site de " + name + " : " + flawPhrase(l) + ". C'est dommage, parce que beaucoup de clients se font une idée d'un commerce sur son site avant de venir.\n\nJe peux vous créer un nouveau site, moderne et rapide. Vous pourrez ensuite modifier vous-même les textes et les photos très facilement.\n\n" + end;
   }
   $("list").addEventListener("click", function (e) {
     var b = e.target.closest("[data-copy]"); if (!b) return;
