@@ -929,7 +929,7 @@ h1{font-size:clamp(28px,4.4vw,40px)}
     var sentN = leads.filter(function (l) { return D.sent[l.id]; }).length;
     var label = (isToday ? "Aujourd'hui, " : "Pour ") + DAYS[D.date.getDay()] + " " + D.date.getDate() + " " + ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"][D.date.getMonth()];
     var warn = "";
-    if (n.getHours() >= 21 || n.getHours() < 7) warn = "Il est tard : un WhatsApp maintenant risque de déranger. Envoie-les plutôt demain à partir de 8h.";
+    if (n.getHours() >= 21 || n.getHours() < 7) { var tm1 = new Date(n); tm1.setDate(tm1.getDate() + 1); warn = "Il est tard : un WhatsApp maintenant risque de déranger. Envoie-les plutôt " + (isToday ? "à partir de 8h" : (dayKey(D.date) === dayKey(tm1) ? "demain" : DAYS[D.date.getDay()]) + " à partir de 8h") + "."; }
     else if (!isToday) warn = "Pas de prospection le week-end ni le dimanche : voici la liste du prochain jour ouvrable.";
     var html = '<div class="panel today-head"><div><h2>' + esc(label) + "</h2><p>" + leads.length + " commerces à contacter · " + sentN + " envoyé" + (sentN > 1 ? "s" : "") + " · un clic ouvre WhatsApp avec le message prêt, le second l'envoie</p></div></div>";
     if (warn) html += '<p class="today-warn" role="status" style="margin-top:10px">' + esc(warn) + "</p>";
