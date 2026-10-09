@@ -107,6 +107,9 @@ h1{font-size:clamp(28px,4.4vw,40px)}
 .pill{display:inline-block;padding:1px 8px;border-radius:999px;font-size:12px;font-weight:700;background:var(--chip);color:var(--ink)}
 .pill.new{background:var(--new-soft);color:var(--new)}
 .pill.gone{background:var(--warn-soft);color:var(--warn)}
+.besttime{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:8px;font-size:13px;color:var(--muted)}
+.besttime b{color:var(--ink);font-weight:600}
+.pill.now{background:var(--ok-soft);color:var(--ok)}
 .contacts{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}
 .ct{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:8px;background:var(--chip);font-size:13.5px;text-decoration:none;color:var(--ink);max-width:100%;overflow-wrap:anywhere}
 .ct .num{font-family:var(--mono);font-size:13px}
@@ -696,6 +699,7 @@ h1{font-size:clamp(28px,4.4vw,40px)}
           (psiKey() ? '<button class="btn btn-sm" type="button" data-psi="' + esc(l.id) + '">' + (l.psi ? "Re-noter" : "Noter automatiquement") + "</button>" : "") +
           '<span class="url">' + esc(i.site) + "</span></div>" +
           '<div class="meta">' + (siteFlags(l).map(function (f) { return '<span class="pill flaw">' + esc(f.t) + "</span>"; }).join("") || (l.psi ? '<span class="pill">Note Google correcte</span>' : '<span>Aucun défaut visible sans test : clique sur « Tester le site »</span>')) + "</div>" : "") +
+        bestTimeHTML(l) +
         '<div class="contacts">' + phones + mails + social + none + '<button class="btn btn-sm" type="button" data-copy="' + esc(l.id) + '">Copier le message</button></div>' +
         '<div class="links"><a href="' + esc(gs) + '" target="_blank" rel="noopener">Vérifier sur Google</a>' +
           '<a href="' + esc(gm) + '" target="_blank" rel="noopener">Google Maps</a>' +
@@ -768,6 +772,58 @@ h1{font-size:clamp(28px,4.4vw,40px)}
     if (AT_HOME.test(t) || /nettoyage|cleaning|schoonmaak/i.test(l.info.name + " " + l.info.kind)) return PITCH.craft;
     return PITCH[l.info.group] || PITCH.shop;
   }
+  /* Meilleur moment pour contacter, selon le métier. Jamais le dimanche. Jours : 1 = lundi … 6 = samedi. */
+  var TIMING = {
+    resto: { days: [2, 3, 4, 5], slots: [[870, 1020]], why: "entre le service de midi et celui du soir" },
+    shop: { days: [1, 2, 3, 4, 5], slots: [[570, 690]], why: "en matinée, le magasin est calme ; évite le samedi" },
+    beauty: { days: [2, 3, 4, 5], slots: [[570, 690]], why: "en matinée en semaine ; souvent fermé le lundi et complet le samedi" },
+    health: { days: [1, 2, 3, 4, 5], slots: [[750, 840]], why: "pendant la pause de midi, entre deux consultations" },
+    craft: { days: [1, 2, 3, 4, 5], slots: [[480, 540], [1020, 1080]], why: "avant de partir sur chantier ou en rentrant" },
+    office: { days: [2, 3, 4], slots: [[570, 690], [840, 960]], why: "en milieu de semaine, hors lundi matin et vendredi après-midi" },
+    stay: { days: [1, 2, 3, 4, 5], slots: [[600, 720]], why: "après les départs des clients du matin" },
+    sport: { days: [1, 2, 3, 4, 5], slots: [[600, 900]], why: "en journée, avant les cours du soir" }
+  };
+  var DAYS = ["dimanche", "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi"];
+  function timingOf(l) {
+    var t = l.info.rawType || "";
+    if (AT_HOME.test(t) || /nettoyage|cleaning|schoonmaak/i.test(l.info.name + " " + l.info.kind)) return TIMING.craft;
+    return TIMING[l.info.group] || TIMING.shop;
+  }
+  function hm(m) { return Math.floor(m / 60) + "h" + (m % 60 ? String(m % 60).padStart(2, "0") : ""); }
+  function daysText(d) {
+    var short = ["dim", "lun", "mar", "mer", "jeu", "ven", "sam"];
+    var run = d.every(function (x, i) { return i === 0 || x === d[i - 1] + 1; });
+    return run && d.length > 2 ? short[d[0]] + "–" + short[d[d.length - 1]] : d.map(function (x) { return short[x]; }).join(", ");
+  }
+  /* Est-ce le bon moment maintenant ? Sinon, quand est le prochain créneau ? (heure de Belgique) */
+  function nowState(tm) {
+    var now = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Brussels" }));
+    var mins = now.getHours() * 60 + now.getMinutes(), day = now.getDay();
+    if (tm.days.indexOf(day) >= 0) {
+      var cur = tm.slots.filter(function (s) { return mins >= s[0] && mins < s[1]; })[0];
+      if (cur) return { now: true, txt: "C'est le moment (jusqu'à " + hm(cur[1]) + ")" };
+    }
+    for (var k = 0; k < 8; k++) {
+      var d = (day + k) % 7;
+      if (tm.days.indexOf(d) < 0) continue;
+      var s = tm.slots.filter(function (x) { return k > 0 || x[0] > mins; })[0];
+      if (s) return { now: false, txt: "Prochain créneau : " + (k === 0 ? "aujourd'hui" : k === 1 ? "demain" : DAYS[d]) + " à " + hm(s[0]) };
+    }
+    return { now: false, txt: "" };
+  }
+  function bestTimeHTML(l) {
+    var tm = timingOf(l), st = nowState(tm);
+    return '<div class="besttime" data-bt="' + esc(l.id) + '"><span>À contacter : <b>' + daysText(tm.days) + ", " + tm.slots.map(function (s) { return hm(s[0]) + "–" + hm(s[1]); }).join(" ou ") + "</b> (" + esc(tm.why) + ")</span>" +
+      '<span class="pill' + (st.now ? " now" : "") + '">' + esc(st.txt) + "</span></div>";
+  }
+  function refreshBestTimes() {
+    Array.prototype.forEach.call(document.querySelectorAll("[data-bt]"), function (el) {
+      var l = store.leads[el.getAttribute("data-bt")]; if (!l || !l.info) return;
+      var st = nowState(timingOf(l)), p = el.querySelector(".pill");
+      p.className = "pill" + (st.now ? " now" : ""); p.textContent = st.txt;
+    });
+  }
+  setInterval(refreshBestTimes, 60 * 1000);
   function subjectFor(l) { return (l.info.site ? "Un nouveau site pour " : "Un site internet pour ") + l.info.name; }
   function msgFor(l) {
     var name = l.info.name;
