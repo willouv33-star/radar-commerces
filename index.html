@@ -586,10 +586,10 @@ h1{font-size:clamp(28px,4.4vw,40px)}
     var i = l.info, isNew = isFresh(l);
     var phones = i.c.phones.map(function (p) {
       var pretty = prettyPhone(p.num), out = '<a class="ct" href="tel:' + esc(p.num) + '"><span>Tél.</span><span class="num">' + esc(pretty) + "</span></a>";
-      if (p.mobile || p.wa) out += '<a class="ct wa" href="https://wa.me/' + esc(p.num.replace("+", "")) + '" target="_blank" rel="noopener">WhatsApp' + (p.wa ? "" : " ?") + "</a>";
+      if (p.mobile || p.wa) out += '<a class="ct wa" href="https://wa.me/' + esc(p.num.replace("+", "")) + "?text=" + encodeURIComponent(msgFor(l)) + '" target="_blank" rel="noopener">WhatsApp avec le message' + (p.wa ? "" : " ?") + "</a>";
       return out;
     }).join("");
-    var mails = i.c.emails.map(function (e) { return '<a class="ct" href="mailto:' + esc(e) + '">' + esc(e) + "</a>"; }).join("");
+    var mails = i.c.emails.map(function (e) { return '<a class="ct" href="mailto:' + esc(e) + "?subject=" + encodeURIComponent(subjectFor(l)) + "&body=" + encodeURIComponent(msgFor(l)) + '">' + esc(e) + " (e-mail prêt)</a>"; }).join("");
     var social = i.c.social.map(function (s) { return '<a class="ct" href="' + esc(s.url) + '" target="_blank" rel="noopener">' + s.kind + "</a>"; }).join("");
     var none = phones || mails || social ? "" : '<span class="ct none">Pas de contact sur la carte : cherche sur Google</span>';
     var gq = encodeURIComponent(i.name + " " + (i.addr || i.addrGuess || i.zone));
@@ -604,7 +604,7 @@ h1{font-size:clamp(28px,4.4vw,40px)}
           (psiKey() ? '<button class="btn btn-sm" type="button" data-psi="' + esc(l.id) + '">' + (l.psi ? "Re-noter" : "Noter automatiquement") + "</button>" : "") +
           '<span class="url">' + esc(i.site) + "</span></div>" +
           '<div class="meta">' + (siteFlags(l).map(function (f) { return '<span class="pill flaw">' + esc(f.t) + "</span>"; }).join("") || (l.psi ? '<span class="pill">Note Google correcte</span>' : '<span>Aucun défaut visible sans test : clique sur « Tester le site »</span>')) + "</div>" : "") +
-        '<div class="contacts">' + phones + mails + social + none + "</div>" +
+        '<div class="contacts">' + phones + mails + social + none + '<button class="btn btn-sm" type="button" data-copy="' + esc(l.id) + '">Copier le message</button></div>' +
         '<div class="links"><a href="https://www.google.com/search?q=' + gq + '" target="_blank" rel="noopener">Vérifier sur Google</a>' +
           '<a href="https://www.google.com/maps/search/?api=1&query=' + gq + '" target="_blank" rel="noopener">Google Maps</a>' +
           '<a href="https://www.openstreetmap.org/' + ({ n: "node", w: "way", r: "relation" }[l.id.charAt(0)]) + "/" + esc(l.id.slice(1)) + '" target="_blank" rel="noopener">Fiche OpenStreetMap</a>' +
@@ -646,6 +646,40 @@ h1{font-size:clamp(28px,4.4vw,40px)}
         setTimeout(function () { geoBusy = false; geoNext(); }, 1100);
       });
   }
+  /* Le message de prospection, déjà rempli pour ce commerce. */
+  function flawPhrase(l) {
+    var u = l.info.site || "";
+    if (/(facebook\.com|fb\.me|instagram\.com|linktr\.ee)/i.test(u)) return "votre présence en ligne passe surtout par une page Facebook ou Instagram, qui ressort beaucoup moins bien sur Google qu'un vrai site";
+    if (LISTINGS.test(u)) return "votre lien internet mène vers une fiche d'annuaire plutôt que vers votre propre site";
+    var p = l.psi;
+    if (p && !p.error && p.mobile === 0) return "votre site ne s'affiche pas bien sur téléphone, alors que la plupart des clients vous cherchent depuis leur GSM";
+    if (p && !p.error && p.perf != null && p.perf < 0.5) return "votre site met du temps à s'ouvrir sur téléphone, et beaucoup de visiteurs partent avant qu'il soit chargé";
+    if (BUILDERS.test(u)) return "votre site est fait sur une plateforme gratuite, ce qui donne souvent une adresse peu professionnelle et parfois de la publicité";
+    if (/^http:\/\//i.test(u)) return "votre site ne semble pas sécurisé (pas de cadenas dans la barre d'adresse), ce qui peut inquiéter certains visiteurs";
+    return "votre site pourrait être plus moderne et plus agréable à utiliser sur téléphone";
+  }
+  function subjectFor(l) { return (l.info.site ? "Un nouveau site pour " : "Un site internet pour ") + l.info.name; }
+  function msgFor(l) {
+    var name = l.info.name;
+    var intro = "Bonjour, je m'appelle Augustin, j'habite à Rhode-Saint-Genèse et je crée des sites internet pour les commerces de la région.";
+    var end = "Je vous propose de vous préparer une première version gratuitement et sans engagement, pour que vous puissiez voir le résultat avant de décider.\n\nSi ça ne vous intéresse pas, pas de souci : dites-le-moi simplement et je ne vous relancerai pas.\n\nBonne journée,\nAugustin";
+    if (!l.info.site) return intro + "\n\nJ'ai vu que " + name + " n'a pas encore de site internet. Aujourd'hui, la plupart des clients cherchent sur Google avant de se déplacer, et sans site ils tombent souvent sur un concurrent.\n\nJe peux vous créer un site moderne, adapté au téléphone, avec vos horaires, vos photos et un bouton pour vous contacter. Vous pourrez ensuite modifier vous-même les textes et les photos très facilement.\n\n" + end;
+    return intro + "\n\nJ'ai regardé le site de " + name + " : " + flawPhrase(l) + ". C'est dommage, parce que beaucoup de clients se font une idée d'un commerce sur son site avant de venir.\n\nJe peux vous créer un nouveau site, moderne et rapide, pensé d'abord pour le téléphone. Vous pourrez ensuite modifier vous-même les textes et les photos très facilement.\n\n" + end;
+  }
+  $("list").addEventListener("click", function (e) {
+    var b = e.target.closest("[data-copy]"); if (!b) return;
+    var l = store.leads[b.getAttribute("data-copy")]; if (!l) return;
+    var txt = msgFor(l);
+    function fallback() {
+      var ta = document.createElement("textarea"); ta.value = txt; ta.style.position = "fixed"; ta.style.opacity = "0";
+      document.body.appendChild(ta); ta.select();
+      var ok = false; try { ok = document.execCommand("copy"); } catch (err) { ok = false; }
+      ta.remove(); return ok;
+    }
+    var done = function () { b.textContent = "Message copié ✓"; setTimeout(function () { b.textContent = "Copier le message"; }, 2500); };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(done, function () { if (fallback()) done(); else toast("Copie impossible dans ce navigateur."); });
+    else if (fallback()) done(); else toast("Copie impossible dans ce navigateur.");
+  });
   function isFresh(l) { return !!l.fresh && Date.now() - l.firstSeen < 7 * DAY; }
 
   function render() {
