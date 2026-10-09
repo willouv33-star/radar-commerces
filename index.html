@@ -176,7 +176,8 @@ h1{font-size:clamp(28px,4.4vw,40px)}
       <option value="contacte">Contacté</option>
       <option value="interesse">Intéressé</option>
       <option value="refus">Pas intéressé</option>
-      <option value="asite">A déjà un site</option>
+      <option value="asite">A déjà un bon site</option>
+      <option value="ferme">Fermé</option>
     </select>
     <label class="toggle"><input type="checkbox" id="fContact" checked> Avec contact seulement</label>
     <label class="toggle"><input type="checkbox" id="fNew"> Nouveaux seulement</label>
@@ -329,6 +330,16 @@ h1{font-size:clamp(28px,4.4vw,40px)}
     return f;
   }
   function siteScore(l) { return siteFlags(l).reduce(function (a, f) { return a + f.w; }, 0); }
+  /* Fermé (définitivement ou temporairement) d'après OpenStreetMap. */
+  var CLOSED_WORDS = /(ferm[ée]e? (d[ée]finitivement|temporairement|pour travaux)|definitief gesloten|tijdelijk gesloten|permanently closed|temporarily closed|\(ferm[ée]e?\)|\(closed\)|\bfailli)/i;
+  function isClosed(t) {
+    if (/^(closed|off|"?ferm[ée]"?)$/i.test(String(t.opening_hours || "").trim())) return true;
+    if (t.disused === "yes" || t.abandoned === "yes" || t.closed === "yes") return true;
+    if (/closed|abandoned|disused/i.test(String(t.operational_status || t.status || ""))) return true;
+    var end = String(t.end_date || "");
+    if (/^\d{4}(-\d{2})?(-\d{2})?$/.test(end) && end <= new Date().toISOString().slice(0, end.length)) return true;
+    return CLOSED_WORDS.test([t.name, t.description, t.note, t["description:fr"], t["note:fr"]].filter(Boolean).join(" "));
+  }
   function isChain(t) {
     if (t.brand || t["brand:wikidata"] || t["operator:wikidata"]) return true;
     return CHAINS.test(String(t.name || "").trim());
@@ -423,6 +434,7 @@ h1{font-size:clamp(28px,4.4vw,40px)}
       var id = e.type.charAt(0) + e.id;
       var lead = store.leads[id];
       if (isChain(t)) return;
+      if (isClosed(t)) { if (lead && lead.status !== "ferme") { lead.status = "ferme"; lead.auto = "Indiqué fermé sur OpenStreetMap"; } return; }
       var site = siteOf(t);
       if (lead && lead.auto && site) { lead.auto = ""; if (lead.status === "asite") lead.status = "nouveau"; }
       found[id] = true;
@@ -542,7 +554,7 @@ h1{font-size:clamp(28px,4.4vw,40px)}
   function hasMail(l) { return l.info.c.emails.length > 0; }
   var tab = "wa";
   try { tab = localStorage.getItem(KEY + ".tab") || "wa"; } catch (e) { /* rien */ }
-  var STATUS = [["nouveau", "Pas encore contacté"], ["contacte", "Contacté"], ["interesse", "Intéressé"], ["refus", "Pas intéressé"], ["asite", "A déjà un bon site"]];
+  var STATUS = [["nouveau", "Pas encore contacté"], ["contacte", "Contacté"], ["interesse", "Intéressé"], ["refus", "Pas intéressé"], ["asite", "A déjà un bon site"], ["ferme", "Fermé"]];
   var shown = 60;
 
   function filtered() {
@@ -556,14 +568,14 @@ h1{font-size:clamp(28px,4.4vw,40px)}
       if (tab === "mail" && !hasMail(l)) return false;
       if (fz && i.zone !== fz) return false;
       if (fc && i.group !== fc) return false;
-      if (fs === "open" && (l.status === "refus" || l.status === "asite")) return false;
+      if (fs === "open" && (l.status === "refus" || l.status === "asite" || l.status === "ferme")) return false;
       if (fs && fs !== "open" && l.status !== fs) return false;
       if (needContact && !i.c.phones.length && !i.c.emails.length && !i.c.social.length) return false;
       if (onlyNew && !isFresh(l)) return false;
       if (q && (i.name + " " + i.kind + " " + i.addr + " " + (i.addrGuess || "") + " " + i.zone + " " + (l.note || "")).toLowerCase().indexOf(q) < 0) return false;
       return true;
     }).sort(function (a, b) {
-      var order = { interesse: 0, contacte: 1, nouveau: 2, refus: 3, asite: 4 };
+      var order = { interesse: 0, contacte: 1, nouveau: 2, refus: 3, asite: 4, ferme: 5 };
       /* Priorité : déjà en discussion, puis WhatsApp, puis e-mail, puis les plus récents. */
       return (order[a.status] - order[b.status]) || (tab === "site" ? siteScore(b) - siteScore(a) : 0) || (hasWa(b) - hasWa(a)) || (hasMail(b) - hasMail(a)) || (b.firstSeen - a.firstSeen) || a.info.name.localeCompare(b.info.name, "fr");
     });
@@ -580,7 +592,7 @@ h1{font-size:clamp(28px,4.4vw,40px)}
     var social = i.c.social.map(function (s) { return '<a class="ct" href="' + esc(s.url) + '" target="_blank" rel="noopener">' + s.kind + "</a>"; }).join("");
     var none = phones || mails || social ? "" : '<span class="ct none">Pas de contact sur la carte : cherche sur Google</span>';
     var gq = encodeURIComponent(i.name + " " + (i.addr || i.addrGuess || i.zone));
-    return '<article class="panel lead' + (l.status === "refus" || l.status === "asite" ? " is-done" : "") + '" data-id="' + esc(l.id) + '">' +
+    return '<article class="panel lead' + (l.status === "refus" || l.status === "asite" || l.status === "ferme" ? " is-done" : "") + '" data-id="' + esc(l.id) + '">' +
       '<div class="lead-main">' +
         '<h2 class="lead-name">' + esc(i.name) + "</h2>" +
         '<div class="meta"><span class="pill">' + esc(i.kind) + "</span><span data-addr=\"" + esc(l.id) + "\">" + addrText(l) + "</span><span>" + esc(i.zone) + "</span>" +
@@ -638,8 +650,8 @@ h1{font-size:clamp(28px,4.4vw,40px)}
   function render() {
     renderZones();
     var all = Object.keys(store.leads).map(function (id) { return store.leads[id]; }).filter(function (l) { return l.info; });
-    var withSite = all.filter(function (l) { return l.info.site && l.status !== "asite" && l.status !== "refus"; });
-    var active = all.filter(function (l) { return l.status !== "asite" && !l.info.site; });
+    var withSite = all.filter(function (l) { return l.info.site && l.status !== "asite" && l.status !== "refus" && l.status !== "ferme"; });
+    var active = all.filter(function (l) { return l.status !== "asite" && l.status !== "ferme" && !l.info.site; });
     
     $("sTotal").textContent = active.length;
     $("sNew").textContent = active.filter(isFresh).length;
