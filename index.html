@@ -271,7 +271,7 @@ h1{font-size:clamp(28px,4.4vw,40px)}
     hearing_aids: "Audioprothésiste", medical_supply: "Matériel médical", kiosk: "Kiosque", variety_store: "Bazar", fabric: "Tissus",
     carpenter: "Menuisier", electrician: "Électricien", plumber: "Plombier", painter: "Peintre", gardener: "Jardinier", roofer: "Couvreur",
     builder: "Entrepreneur", shoemaker: "Cordonnier", locksmith: "Serrurier", tiler: "Carreleur", glaziery: "Vitrier", stonemason: "Tailleur de pierre",
-    upholsterer: "Tapissier", hvac: "Chauffagiste", caterer: "Traiteur", window_construction: "Châssis",
+    upholsterer: "Tapissier", hvac: "Chauffagiste", caterer: "Traiteur", window_construction: "Châssis", cleaning: "Nettoyage",
     accountant: "Comptable", lawyer: "Avocat", notary: "Notaire", architect: "Architecte", insurance: "Assurances", it: "Informatique (bureau)",
     consulting: "Consultant", therapist: "Thérapeute", tax_advisor: "Conseiller fiscal", financial: "Conseil financier", company: "Entreprise",
     physiotherapist: "Kiné", psychotherapist: "Psy", alternative: "Médecine douce", podiatrist: "Podologue", speech_therapist: "Logopède",
@@ -446,7 +446,7 @@ h1{font-size:clamp(28px,4.4vw,40px)}
       var keep = lead && lead.info && lead.info.zone !== zone.name && !(t["addr:city"] && zone.name.toLowerCase().indexOf(String(t["addr:city"]).toLowerCase().split(/[ -]/)[0]) === 0);
       var info = {
         name: String(t.name).trim(), kind: kindOf(t), group: groupOf(t), addr: addr, zone: keep ? lead.info.zone : zone.name, region: keep ? lead.info.region : zone.region,
-        lat: lat, lon: lon, hours: t.opening_hours || "", c: contactsOf(t), site: site
+        lat: lat, lon: lon, hours: t.opening_hours || "", c: contactsOf(t), site: site, rawType: String(t.craft || t.shop || t.amenity || t.office || t.healthcare || "").split(";")[0]
       };
       /* « Nouveau » seulement si la commune avait déjà été scannée : le premier scan remplit la liste, il ne crée pas de nouveautés. */
       if (!lead) store.leads[id] = lead = { id: id, firstSeen: now, fresh: !!store.scans[zone.name], status: "nouveau", note: "" };
@@ -659,13 +659,32 @@ h1{font-size:clamp(28px,4.4vw,40px)}
     if (/^http:\/\//i.test(u)) return "votre site ne semble pas sécurisé (pas de cadenas dans la barre d'adresse), ce qui peut inquiéter certains visiteurs";
     return "votre site pourrait être plus moderne et plus agréable à utiliser";
   }
+  /* L'argument change selon le métier : on ne « se déplace » pas chez un plombier ou une société de nettoyage. */
+  var PITCH = {
+    resto: { why: "la plupart des gens regardent la carte, les photos et les avis en ligne avant de choisir où manger, et sans site ils vont souvent ailleurs", before: "avant de venir", noun: "un restaurant" },
+    shop: { why: "la plupart des clients vérifient en ligne vos horaires et ce que vous proposez avant de passer, et sans site ils vont souvent chez un concurrent", before: "avant de venir", noun: "un magasin" },
+    beauty: { why: "la plupart des clients cherchent sur Google et regardent les prestations et les prix avant de prendre rendez-vous, et sans site ils réservent souvent ailleurs", before: "avant de prendre rendez-vous", noun: "un salon" },
+    health: { why: "la plupart des patients cherchent sur Google avant de prendre rendez-vous, pour voir les soins proposés, les horaires et comment vous joindre", before: "avant de prendre rendez-vous", noun: "un cabinet" },
+    craft: { why: "quand quelqu'un a besoin d'un service comme le vôtre, il commence presque toujours par chercher sur Google, et sans site c'est souvent un concurrent qui reçoit l'appel", before: "avant de vous contacter", noun: "une entreprise" },
+    office: { why: "avant de choisir un prestataire, la plupart des gens comparent sur Google, et un site inspire tout de suite plus de confiance", before: "avant de vous contacter", noun: "une entreprise" },
+    stay: { why: "la plupart des voyageurs réservent après avoir vu des photos et les informations en ligne, et sans site vous dépendez des plateformes qui prennent une commission", before: "avant de réserver", noun: "un hébergement" },
+    sport: { why: "la plupart des gens regardent les cours, les horaires et les tarifs en ligne avant de s'inscrire, et sans site ils vont souvent ailleurs", before: "avant de s'inscrire", noun: "un club" }
+  };
+  /* Services qui se déplacent chez le client, même quand la carte les range parmi les magasins. */
+  var AT_HOME = /^(cleaning|plumber|electrician|painter|gardener|roofer|builder|locksmith|tiler|glaziery|hvac|carpenter|window_construction|caterer|upholsterer|stonemason)$/;
+  function pitchOf(l) {
+    var t = l.info.rawType || "";
+    if (AT_HOME.test(t) || /nettoyage|cleaning|schoonmaak/i.test(l.info.name + " " + l.info.kind)) return PITCH.craft;
+    return PITCH[l.info.group] || PITCH.shop;
+  }
   function subjectFor(l) { return (l.info.site ? "Un nouveau site pour " : "Un site internet pour ") + l.info.name; }
   function msgFor(l) {
     var name = l.info.name;
-    var intro = "Bonjour, je m'appelle Augustin, j'habite à Rhode-Saint-Genèse et je crée des sites internet pour les commerces de la région.";
+    var intro = "Bonjour, je m'appelle Augustin, j'habite à Rhode-Saint-Genèse et je crée des sites internet pour les commerces et les entreprises de la région.";
+    var pt = pitchOf(l);
     var end = "Je vous propose de vous préparer une première version gratuitement et sans engagement, pour que vous puissiez voir le résultat avant de décider.\n\nSi ça ne vous intéresse pas, pas de souci : dites-le-moi simplement et je ne vous relancerai pas.\n\nBonne journée,\nAugustin";
-    if (!l.info.site) return intro + "\n\nJ'ai vu que " + name + " n'a pas encore de site internet. Aujourd'hui, la plupart des clients cherchent sur Google avant de se déplacer, et sans site ils tombent souvent sur un concurrent.\n\nJe peux vous créer un site moderne, avec vos horaires, vos photos et un bouton pour vous contacter. Vous pourrez ensuite modifier vous-même les textes et les photos très facilement.\n\n" + end;
-    return intro + "\n\nJ'ai regardé le site de " + name + " : " + flawPhrase(l) + ". C'est dommage, parce que beaucoup de clients se font une idée d'un commerce sur son site avant de venir.\n\nJe peux vous créer un nouveau site, moderne et rapide. Vous pourrez ensuite modifier vous-même les textes et les photos très facilement.\n\n" + end;
+    if (!l.info.site) return intro + "\n\nJ'ai vu que " + name + " n'a pas encore de site internet. Aujourd'hui, " + pt.why + ".\n\nJe peux vous créer un site moderne, avec vos horaires, vos photos et un bouton pour vous contacter. Vous pourrez ensuite modifier vous-même les textes et les photos très facilement.\n\n" + end;
+    return intro + "\n\nJ'ai regardé le site de " + name + " : " + flawPhrase(l) + ". C'est dommage, parce que beaucoup de clients se font une idée d'" + pt.noun + " sur son site " + pt.before + ".\n\nJe peux vous créer un nouveau site, moderne et rapide. Vous pourrez ensuite modifier vous-même les textes et les photos très facilement.\n\n" + end;
   }
   $("list").addEventListener("click", function (e) {
     var b = e.target.closest("[data-copy]"); if (!b) return;
