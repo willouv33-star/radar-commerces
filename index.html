@@ -110,6 +110,22 @@ h1{font-size:clamp(28px,4.4vw,40px)}
 .besttime{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:8px;font-size:13px;color:var(--muted)}
 .besttime b{color:var(--ink);font-weight:600}
 .pill.now{background:var(--ok-soft);color:var(--ok)}
+.today-head{padding:14px 16px;display:flex;flex-wrap:wrap;gap:8px 16px;align-items:baseline;justify-content:space-between}
+.today-head h2{font-size:22px}
+.today-head p{margin:0;color:var(--muted);font-size:14px}
+.today-warn{margin:0;padding:10px 14px;border-radius:10px;background:var(--new-soft);color:var(--new);font-weight:600;font-size:14px}
+.slot{margin-top:6px}
+.slot h3{margin:14px 0 6px;font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);display:flex;gap:8px;align-items:center}
+.trow{padding:10px 14px;display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;justify-content:space-between;margin-bottom:6px}
+.trow .who{min-width:0;flex:1 1 240px}
+.trow .who b{font-size:16px}
+.trow .who span{display:block;color:var(--muted);font-size:13px}
+.trow.sent{opacity:.6}
+.btn-wa{background:var(--ok);border-color:var(--ok);color:#fff;min-height:44px;padding:8px 18px;font-size:15px}
+.btn-wa:hover{border-color:var(--ok);filter:brightness(1.08)}
+.trow .done{color:var(--ok);font-weight:700;font-size:14px}
+.tab.today[aria-selected="true"]{border-bottom-color:var(--accent)}
+.tab.today b{background:var(--accent-soft);color:var(--accent)}
 .contacts{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}
 .ct{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:8px;background:var(--chip);font-size:13.5px;text-decoration:none;color:var(--ink);max-width:100%;overflow-wrap:anywhere}
 .ct .num{font-family:var(--mono);font-size:13px}
@@ -163,13 +179,14 @@ h1{font-size:clamp(28px,4.4vw,40px)}
   </section>
 
   <div class="tabs" role="tablist" aria-label="Moyen de contact">
+    <button class="tab today" role="tab" type="button" data-tab="today" aria-selected="false">Liste du jour <b id="nToday">0</b></button>
     <button class="tab wa" role="tab" type="button" data-tab="wa" aria-selected="true">WhatsApp <b id="nWa">0</b></button>
     <button class="tab" role="tab" type="button" data-tab="mail" aria-selected="false">E-mail <b id="nMail">0</b></button>
     <button class="tab" role="tab" type="button" data-tab="all" aria-selected="false">Tous sans site <b id="nAll">0</b></button>
     <button class="tab site" role="tab" type="button" data-tab="site" aria-selected="false">Sites à refaire <b id="nSite">0</b></button>
     <button class="tab site" role="tab" type="button" data-tab="sitewa" aria-selected="false">Site à refaire + WhatsApp <b id="nSiteWa">0</b></button>
   </div>
-  <section class="filters" aria-label="Filtres">
+  <section class="filters" id="filters" aria-label="Filtres">
     <input type="search" id="q" placeholder="Chercher un nom, une rue, un métier…" aria-label="Chercher">
     <select id="fZone" aria-label="Commune"><option value="">Toutes les communes</option></select>
     <select id="fCat" aria-label="Type"><option value="">Tous les types</option></select>
@@ -345,6 +362,8 @@ h1{font-size:clamp(28px,4.4vw,40px)}
     if (/^\d{4}(-\d{2})?(-\d{2})?$/.test(end) && end <= new Date().toISOString().slice(0, end.length)) return true;
     return CLOSED_WORDS.test([t.name, t.description, t.note, t["description:fr"], t["note:fr"]].filter(Boolean).join(" "));
   }
+  /* Médecins, cliniques et hôpitaux : pas besoin de site, on les écarte. */
+  function isDoctor(t) { return /^(doctors?|clinic|hospital)$/.test(t.amenity || "") || /^(doctor|clinic|hospital)$/.test(t.healthcare || ""); }
   function isChain(t) {
     if (t.brand || t["brand:wikidata"] || t["operator:wikidata"]) return true;
     return CHAINS.test(String(t.name || "").trim());
@@ -393,6 +412,8 @@ h1{font-size:clamp(28px,4.4vw,40px)}
   var KEY = "radar-commerces.v1";
   var store = { leads: {}, scans: {}, zones: DEFAULT_ZONES.slice(), auto: true };
   try { var raw = localStorage.getItem(KEY); if (raw) { var s = JSON.parse(raw); if (s && s.leads) store = Object.assign(store, s); } } catch (e) { /* mémoire indisponible */ }
+  /* Les médecins déjà enregistrés sont retirés (ils n'ont pas besoin de site). */
+  Object.keys(store.leads).forEach(function (id) { var i = store.leads[id].info; if (i && /^(doctors?|clinic|hospital)$/.test(i.rawType || "")) delete store.leads[id]; });
   function save() { try { localStorage.setItem(KEY, JSON.stringify(store)); } catch (e) { toast("Impossible d'enregistrer dans ce navigateur : tes suivis seront perdus à la fermeture."); } }
 
   /* ---------- Requête OpenStreetMap ---------- */
@@ -439,6 +460,7 @@ h1{font-size:clamp(28px,4.4vw,40px)}
       var id = e.type.charAt(0) + e.id;
       var lead = store.leads[id];
       if (isChain(t)) return;
+      if (isDoctor(t)) { delete store.leads[id]; return; }
       if (isClosed(t)) { if (lead && lead.status !== "ferme") { lead.status = "ferme"; lead.auto = "Indiqué fermé sur OpenStreetMap"; } return; }
       var site = siteOf(t);
       if (lead && lead.auto && site) { lead.auto = ""; if (lead.status === "asite") lead.status = "nouveau"; }
@@ -647,8 +669,8 @@ h1{font-size:clamp(28px,4.4vw,40px)}
 
   function hasWa(l) { return l.info.c.phones.some(function (p) { return p.mobile || p.wa; }); }
   function hasMail(l) { return l.info.c.emails.length > 0; }
-  var tab = "wa";
-  try { tab = localStorage.getItem(KEY + ".tab") || "wa"; } catch (e) { /* rien */ }
+  var tab = "today";
+  try { tab = localStorage.getItem(KEY + ".tab2") || "today"; } catch (e) { /* rien */ }
   var STATUS = [["nouveau", "Pas encore contacté"], ["contacte", "Contacté"], ["interesse", "Intéressé"], ["refus", "Pas intéressé"], ["asite", "A déjà un bon site"], ["ferme", "Fermé"]];
   var shown = 60;
 
@@ -680,10 +702,10 @@ h1{font-size:clamp(28px,4.4vw,40px)}
     var i = l.info, isNew = isFresh(l);
     var phones = i.c.phones.map(function (p) {
       var pretty = prettyPhone(p.num), out = '<a class="ct" href="tel:' + esc(p.num) + '"><span>Tél.</span><span class="num">' + esc(pretty) + "</span></a>";
-      if (p.mobile || p.wa) out += '<a class="ct wa" href="https://wa.me/' + esc(p.num.replace("+", "")) + "?text=" + encodeURIComponent(msgFor(l)) + '" target="_blank" rel="noopener">WhatsApp avec le message' + (p.wa ? "" : " ?") + "</a>";
+      if (p.mobile || p.wa) out += '<a class="ct wa" href="' + esc(waHref(l, p.num)) + '" data-wa="' + esc(l.id) + '" data-num="' + esc(p.num) + '" target="radar_wa" rel="noopener">WhatsApp avec le message' + (p.wa ? "" : " ?") + "</a>";
       return out;
     }).join("");
-    var mails = i.c.emails.map(function (e) { return '<a class="ct" href="mailto:' + esc(e) + "?subject=" + encodeURIComponent(subjectFor(l)) + "&body=" + encodeURIComponent(msgFor(l)) + '">' + esc(e) + " (e-mail prêt)</a>"; }).join("");
+    var mails = i.c.emails.map(function (e) { return '<a class="ct" data-mail="' + esc(l.id) + '" href="mailto:' + esc(e) + "?subject=" + encodeURIComponent(subjectFor(l)) + "&body=" + encodeURIComponent(msgFor(l)) + '">' + esc(e) + " (e-mail prêt)</a>"; }).join("");
     var social = i.c.social.map(function (s) { return '<a class="ct" href="' + esc(s.url) + '" target="_blank" rel="noopener">' + s.kind + "</a>"; }).join("");
     var none = phones || mails || social ? "" : '<span class="ct none">Pas de contact sur la carte : cherche sur Google</span>';
     var gq = encodeURIComponent(i.name + " " + (i.addr || i.addrGuess || i.zone));
@@ -827,9 +849,10 @@ h1{font-size:clamp(28px,4.4vw,40px)}
   function subjectFor(l) { return (l.info.site ? "Un nouveau site pour " : "Un site internet pour ") + l.info.name; }
   function msgFor(l) {
     var name = l.info.name;
-    var intro = "Bonjour, je m'appelle Augustin, j'habite à Rhode-Saint-Genèse et je crée des sites internet pour les commerces et les entreprises de la région.";
+    var evening = bxNow().getHours() >= 18;
+    var intro = (evening ? "Bonsoir" : "Bonjour") + ", je m'appelle Augustin, j'habite à Rhode-Saint-Genèse et je crée des sites internet pour les commerces et les entreprises de la région.";
     var pt = pitchOf(l);
-    var end = "Je vous propose de vous préparer une première version gratuitement et sans engagement, pour que vous puissiez voir le résultat avant de décider.\n\nSi ça ne vous intéresse pas, pas de souci : dites-le-moi simplement et je ne vous relancerai pas.\n\nBonne journée,\nAugustin";
+    var end = "Je vous propose de vous préparer une première version gratuitement et sans engagement, pour que vous puissiez voir le résultat avant de décider.\n\nSi ça ne vous intéresse pas, pas de souci : dites-le-moi simplement et je ne vous relancerai pas.\n\n" + (evening ? "Bonne soirée" : "Bonne journée") + ",\nAugustin";
     if (!l.info.site) return intro + "\n\nJ'ai vu que " + name + " n'a pas encore de site internet. Aujourd'hui, " + pt.why + ".\n\nJe peux vous créer un site moderne, avec vos horaires, vos photos et un bouton pour vous contacter. Vous pourrez ensuite modifier vous-même les textes et les photos très facilement.\n\n" + end;
     return intro + "\n\nJ'ai regardé le site de " + name + " : " + flawPhrase(l) + ". C'est dommage, parce que beaucoup de clients se font une idée d'" + pt.noun + " sur son site " + pt.before + ".\n\nJe peux vous créer un nouveau site, moderne et rapide. Vous pourrez ensuite modifier vous-même les textes et les photos très facilement.\n\n" + end;
   }
@@ -859,6 +882,83 @@ h1{font-size:clamp(28px,4.4vw,40px)}
   }
   function isFresh(l) { return !!l.fresh && Date.now() - l.firstSeen < 7 * DAY; }
 
+  /* ---------- Liste du jour : 15 WhatsApp à envoyer, rangés par meilleure heure ---------- */
+  var DAILY_N = 15;
+  function bxNow() { return new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Brussels" })); }
+  function dayKey(d) { return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
+  /* Le jour visé : aujourd'hui en semaine ; après 20h, le week-end ou un jour férié de fait, le prochain jour ouvrable. */
+  function targetDay() {
+    var d = bxNow();
+    if (d.getHours() >= 20) d.setDate(d.getDate() + 1);
+    while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() + 1);
+    return d;
+  }
+  function isMobileDevice() { return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent); }
+  function waHref(l, num) {
+    var n = String(num).replace(/\D/g, ""), t = encodeURIComponent(msgFor(l));
+    return isMobileDevice() ? "https://wa.me/" + n + "?text=" + t : "https://web.whatsapp.com/send?phone=" + n + "&text=" + t;
+  }
+  function waNum(l) { var p = l.info.c.phones.filter(function (x) { return x.mobile || x.wa; })[0]; return p && p.num; }
+  function dailyOk(l, wd) {
+    return l.info && !l.gone && l.status === "nouveau" && waNum(l) && (!l.info.site || siteScore(l) > 0) && timingOf(l).days.indexOf(wd) >= 0;
+  }
+  function dailyList() {
+    var d = targetDay(), key = dayKey(d), wd = d.getDay();
+    if (!store.daily || store.daily.date !== key) store.daily = { date: key, ids: [], sent: {} };
+    var D = store.daily;
+    /* On garde ceux déjà choisis (même envoyés), on retire ceux qui ne conviennent plus, et on complète jusqu'à 15. */
+    D.ids = D.ids.filter(function (id) { var l = store.leads[id]; return l && l.info && (D.sent[id] || dailyOk(l, wd)); });
+    if (D.ids.length < DAILY_N) {
+      var taken = {}; D.ids.forEach(function (id) { taken[id] = 1; });
+      var pool = Object.keys(store.leads).map(function (id) { return store.leads[id]; }).filter(function (l) { return !taken[l.id] && dailyOk(l, wd); })
+        .sort(function (a, b) { return (!!a.info.site - !!b.info.site) || (isFresh(b) - isFresh(a)) || (siteScore(b) - siteScore(a)) || (b.firstSeen - a.firstSeen); });
+      pool.slice(0, DAILY_N - D.ids.length).forEach(function (l) { D.ids.push(l.id); });
+    }
+    return { date: d, today: key === dayKey(bxNow()), ids: D.ids, sent: D.sent };
+  }
+  function slotFor(l, isToday) {
+    var tm = timingOf(l), n = bxNow(), mins = n.getHours() * 60 + n.getMinutes();
+    if (isToday) { var open = tm.slots.filter(function (s) { return mins < s[1]; })[0]; if (open) return open; }
+    return tm.slots[0];
+  }
+  function renderToday() {
+    var D = dailyList(), isToday = D.today, n = bxNow(), mins = n.getHours() * 60 + n.getMinutes();
+    var leads = D.ids.map(function (id) { return store.leads[id]; });
+    var groups = {};
+    leads.forEach(function (l) { var s = slotFor(l, isToday), k = s[0] + "-" + s[1]; (groups[k] = groups[k] || { s: s, items: [] }).items.push(l); });
+    var sentN = leads.filter(function (l) { return D.sent[l.id]; }).length;
+    var label = (isToday ? "Aujourd'hui, " : "Pour ") + DAYS[D.date.getDay()] + " " + D.date.getDate() + " " + ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"][D.date.getMonth()];
+    var warn = "";
+    if (n.getHours() >= 21 || n.getHours() < 7) warn = "Il est tard : un WhatsApp maintenant risque de déranger. Envoie-les plutôt demain à partir de 8h.";
+    else if (!isToday) warn = "Pas de prospection le week-end ni le dimanche : voici la liste du prochain jour ouvrable.";
+    var html = '<div class="panel today-head"><div><h2>' + esc(label) + "</h2><p>" + leads.length + " commerces à contacter · " + sentN + " envoyé" + (sentN > 1 ? "s" : "") + " · un clic ouvre WhatsApp avec le message prêt, le second l'envoie</p></div></div>";
+    if (warn) html += '<p class="today-warn" role="status" style="margin-top:10px">' + esc(warn) + "</p>";
+    if (!leads.length) html += '<div class="panel empty" style="margin-top:10px"><h2>Rien à envoyer pour l\'instant</h2><p>Tous les commerces avec un GSM ont déjà été contactés, ou le scan n\'est pas terminé. Coche d\'autres communes et lance un scan pour en trouver de nouveaux.</p></div>';
+    Object.keys(groups).sort(function (a, b) { return groups[a].s[0] - groups[b].s[0]; }).forEach(function (k) {
+      var g = groups[k], live = isToday && mins >= g.s[0] && mins < g.s[1], past = isToday && mins >= g.s[1];
+      html += '<div class="slot"><h3>' + hm(g.s[0]) + "–" + hm(g.s[1]) + (live ? ' <span class="pill now">C\'est le moment</span>' : past ? ' <span class="pill">Créneau passé, envoie quand tu peux</span>' : "") + "</h3>" +
+        g.items.map(function (l) {
+          var i = l.info, sent = D.sent[l.id], num = waNum(l);
+          return '<div class="panel trow' + (sent ? " sent" : "") + '"><div class="who"><b>' + esc(i.name) + "</b><span>" + esc(i.kind) + " · " + esc(i.zone) + (i.site ? " · site à refaire" : "") + " · " + esc(prettyPhone(num || "")) + "</span></div>" +
+            (sent ? '<span class="done">Envoyé ✓ ' + esc(sent) + "</span>" : "") +
+            '<a class="btn btn-wa" href="' + esc(waHref(l, num)) + '" data-wa="' + esc(l.id) + '" data-num="' + esc(num) + '" target="radar_wa" rel="noopener">' + (sent ? "Rouvrir WhatsApp" : "Envoyer sur WhatsApp") + "</a></div>";
+        }).join("") + "</div>";
+    });
+    $("list").innerHTML = html;
+  }
+  /* Au clic : message recalculé (bonjour/bonsoir selon l'heure) et commerce noté « Contacté ». */
+  document.addEventListener("click", function (e) {
+    var m = e.target.closest("a[data-mail]");
+    if (m) { var lm = store.leads[m.getAttribute("data-mail")]; if (lm) m.href = m.href.split("&body=")[0] + "&body=" + encodeURIComponent(msgFor(lm)); return; }
+    var a = e.target.closest("a[data-wa]"); if (!a) return;
+    var l = store.leads[a.getAttribute("data-wa")]; if (!l) return;
+    a.href = waHref(l, a.getAttribute("data-num"));
+    var n = bxNow(), stamp = n.toLocaleDateString("fr-BE") + " à " + hm(n.getHours() * 60 + n.getMinutes());
+    if (l.status === "nouveau") { l.status = "contacte"; l.statusAt = Date.now(); l.note = ((l.note || "") + (l.note ? "\n" : "") + "WhatsApp envoyé le " + stamp).trim(); }
+    if (store.daily && store.daily.ids.indexOf(l.id) >= 0 && !store.daily.sent[l.id]) store.daily.sent[l.id] = "à " + hm(n.getHours() * 60 + n.getMinutes());
+    save(); setTimeout(render, 300);
+  });
+
   function render() {
     renderZones();
     var all = Object.keys(store.leads).map(function (id) { return store.leads[id]; }).filter(function (l) { return l.info; });
@@ -879,6 +979,9 @@ h1{font-size:clamp(28px,4.4vw,40px)}
     $("fAllSitesWrap").hidden = !siteTab;
     $("psiBatch").hidden = !siteTab || !psiKey();
     Array.prototype.forEach.call(document.querySelectorAll(".tab"), function (b) { b.setAttribute("aria-selected", b.getAttribute("data-tab") === tab ? "true" : "false"); });
+    var dl = dailyList(); $("nToday").textContent = dl.ids.filter(function (id) { return !dl.sent[id]; }).length;
+    $("filters").style.display = tab === "today" ? "none" : "";
+    if (tab === "today" && all.length) { $("count").textContent = ""; $("moreBtn").hidden = true; renderToday(); save(); return; }
 
     var cats = {};
     active.forEach(function (l) { cats[l.info.group] = (cats[l.info.group] || 0) + 1; });
@@ -949,7 +1052,7 @@ h1{font-size:clamp(28px,4.4vw,40px)}
   document.querySelector(".tabs").addEventListener("click", function (e) {
     var b = e.target.closest(".tab"); if (!b) return;
     tab = b.getAttribute("data-tab"); shown = 60;
-    try { localStorage.setItem(KEY + ".tab", tab); } catch (err) { /* rien */ }
+    try { localStorage.setItem(KEY + ".tab2", tab); } catch (err) { /* rien */ }
     render();
   });
   $("allZones").addEventListener("click", function () { store.zones = ZONES.map(function (z) { return z.name; }); save(); render(); updateStatus(); toast("Les " + ZONES.length + " communes sont cochées. Clique sur « Scanner maintenant » pour les scanner."); });
