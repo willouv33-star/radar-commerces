@@ -164,6 +164,7 @@ h1{font-size:clamp(28px,4.4vw,40px)}
     <button class="tab" role="tab" type="button" data-tab="mail" aria-selected="false">E-mail <b id="nMail">0</b></button>
     <button class="tab" role="tab" type="button" data-tab="all" aria-selected="false">Tous sans site <b id="nAll">0</b></button>
     <button class="tab site" role="tab" type="button" data-tab="site" aria-selected="false">Sites à refaire <b id="nSite">0</b></button>
+    <button class="tab site" role="tab" type="button" data-tab="sitewa" aria-selected="false">Site à refaire + WhatsApp <b id="nSiteWa">0</b></button>
   </div>
   <section class="filters" aria-label="Filtres">
     <input type="search" id="q" placeholder="Chercher un nom, une rue, un métier…" aria-label="Chercher">
@@ -562,9 +563,9 @@ h1{font-size:clamp(28px,4.4vw,40px)}
     var needContact = $("fContact").checked, onlyNew = $("fNew").checked;
     return Object.keys(store.leads).map(function (id) { return store.leads[id]; }).filter(function (l) {
       var i = l.info; if (!i) return false;
-      if (tab === "site") { if (!i.site) return false; if (!$("fAllSites").checked && !siteScore(l)) return false; }
+      if (tab === "site" || tab === "sitewa") { if (!i.site) return false; if (!$("fAllSites").checked && !siteScore(l)) return false; }
       else if (i.site) return false;
-      if (tab === "wa" && !hasWa(l)) return false;
+      if ((tab === "wa" || tab === "sitewa") && !hasWa(l)) return false;
       if (tab === "mail" && !hasMail(l)) return false;
       if (fz && i.zone !== fz) return false;
       if (fc && i.group !== fc) return false;
@@ -577,7 +578,7 @@ h1{font-size:clamp(28px,4.4vw,40px)}
     }).sort(function (a, b) {
       var order = { interesse: 0, contacte: 1, nouveau: 2, refus: 3, asite: 4, ferme: 5 };
       /* Priorité : déjà en discussion, puis WhatsApp, puis e-mail, puis les plus récents. */
-      return (order[a.status] - order[b.status]) || (tab === "site" ? siteScore(b) - siteScore(a) : 0) || (hasWa(b) - hasWa(a)) || (hasMail(b) - hasMail(a)) || (b.firstSeen - a.firstSeen) || a.info.name.localeCompare(b.info.name, "fr");
+      return (order[a.status] - order[b.status]) || (tab === "site" || tab === "sitewa" ? siteScore(b) - siteScore(a) : 0) || (hasWa(b) - hasWa(a)) || (hasMail(b) - hasMail(a)) || (b.firstSeen - a.firstSeen) || a.info.name.localeCompare(b.info.name, "fr");
     });
   }
 
@@ -662,8 +663,10 @@ h1{font-size:clamp(28px,4.4vw,40px)}
     $("nMail").textContent = open.filter(hasMail).length;
     $("nAll").textContent = open.length;
     $("nSite").textContent = withSite.filter(function (l) { return siteScore(l) > 0; }).length;
-    $("fAllSitesWrap").hidden = tab !== "site";
-    $("psiBatch").hidden = tab !== "site" || !psiKey();
+    $("nSiteWa").textContent = withSite.filter(function (l) { return siteScore(l) > 0 && hasWa(l); }).length;
+    var siteTab = tab === "site" || tab === "sitewa";
+    $("fAllSitesWrap").hidden = !siteTab;
+    $("psiBatch").hidden = !siteTab || !psiKey();
     Array.prototype.forEach.call(document.querySelectorAll(".tab"), function (b) { b.setAttribute("aria-selected", b.getAttribute("data-tab") === tab ? "true" : "false"); });
 
     var cats = {};
