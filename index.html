@@ -451,7 +451,7 @@ h1{font-size:clamp(28px,4.4vw,40px)}
       };
       /* « Nouveau » seulement si la commune avait déjà été scannée : le premier scan remplit la liste, il ne crée pas de nouveautés. */
       if (!lead) store.leads[id] = lead = { id: id, firstSeen: now, fresh: !!store.scans[zone.name], status: "nouveau", note: "" };
-      if (!info.site && lead.web && lead.web.found) { info.site = "https://" + lead.web.found; info.siteAuto = true; }
+      if (!info.site && lead.web && lead.web.found && lead.web.v === 2) { info.site = "https://" + lead.web.found; info.siteAuto = true; }
       lead.info = info;
       lead.lastSeen = now;
       lead.gone = false;
@@ -531,32 +531,48 @@ h1{font-size:clamp(28px,4.4vw,40px)}
     var out = [];
     l.info.c.emails.forEach(function (e) { var d = String(e).split("@")[1]; if (d && !FREE_MAIL.test(d.toLowerCase() + ".")) out.push(d.toLowerCase()); });
     var w = slugWords(l.info.name), sig = w.filter(function (x) { return !GENERIC_WORDS.test(x) && x.length > 1; });
-    var stems = [w.join(""), w.join("-")];
-    if (sig.length && sig.length < w.length) stems.push(sig.join(""), sig.join("-"));
-    if (sig.length && sig[0].length >= 4) stems.push(sig[0]);
-    stems.forEach(function (st) { if (st.length >= 4 && st.length <= 40) ["be", "com"].forEach(function (tld) { out.push(st + "." + tld); }); });
-    return out.filter(function (d, i) { return out.indexOf(d) === i; }).slice(0, 10);
+    function add(st, tlds) { if (st.length >= 4 && st.length <= 40) tlds.forEach(function (tld) { out.push(st + "." + tld); }); }
+    add(w.join(""), w.length > 1 ? ["be", "com"] : ["be"]);
+    if (w.length > 1) add(w.join("-"), ["be"]);
+    if (sig.length && sig.join("") !== w.join("")) add(sig.join(""), ["be"]);
+    if (sig.length && sig[0].length >= 5 && sig[0] !== w.join("")) add(sig[0], ["be"]);
+    return out.filter(function (d, i) { return out.indexOf(d) === i; }).slice(0, 7);
+  }
+  /* Le contenu du site doit parler de CE commerce : son téléphone, son e-mail, ou son nom avec sa commune ou sa rue. */
+  function normTxt(x) { return String(x || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase(); }
+  function pageText(d) {
+    return fetch("https://r.jina.ai/https://" + d, { headers: { "X-Return-Format": "text" } }).then(function (r) {
+      if (r.status === 429 || r.status >= 500) throw new Error("lecteur saturé");
+      return r.ok ? r.text() : "";
+    });
+  }
+  function pageMatches(l, text) {
+    var t = normTxt(text), digits = String(text).replace(/\D/g, "");
+    if (l.info.c.phones.some(function (p) { var d = p.num.replace(/\D/g, "").slice(-8); return d.length === 8 && digits.indexOf(d) >= 0; })) return true;
+    if (l.info.c.emails.some(function (e) { return t.indexOf(String(e).toLowerCase()) >= 0; })) return true;
+    var words = slugWords(l.info.name).filter(function (x) { return x.length > 2; });
+    var sig = words.filter(function (x) { return !GENERIC_WORDS.test(x); });
+    if (!sig.length) sig = words;
+    if (!sig.length || !sig.every(function (x) { return t.indexOf(x) >= 0; })) return false;
+    var a = normTxt(l.info.addr || l.info.addrGuess || ""), pc = (a.match(/\b\d{4}\b/) || [])[0];
+    var street = a.split(",")[0].replace(/\d+/g, "").trim();
+    var town = normTxt(l.info.zone).split(/[ \/-]/)[0];
+    return !!((pc && digits.indexOf(pc) >= 0) || (street.length > 5 && t.indexOf(street) >= 0) || (town.length > 3 && t.indexOf(town) >= 0));
   }
   function dnsHas(d) {
     return fetch("https://dns.google/resolve?type=A&name=" + encodeURIComponent(d)).then(function (r) { return r.json(); })
       .then(function (j) { return !!(j && j.Status === 0 && j.Answer && j.Answer.length); }, function () { return false; });
-  }
-  function webAnswers(d) {
-    var ctl = new AbortController(), t = setTimeout(function () { ctl.abort(); }, 7000);
-    return fetch("https://" + d + "/", { mode: "no-cors", signal: ctl.signal, cache: "no-store" })
-      .then(function () { return true; }, function () {
-        return fetch("http://www." + d + "/", { mode: "no-cors", signal: ctl.signal }).then(function () { return true; }, function () { return false; });
-      }).finally(function () { clearTimeout(t); });
   }
   function checkLead(l) {
     var cands = domainCandidates(l), k = 0;
     function next() {
       if (k >= cands.length) return Promise.resolve("");
       var d = cands[k++];
-      return dnsHas(d).then(function (ok) { return ok ? webAnswers(d) : false; }).then(function (ok) { return ok ? d : next(); });
+      return dnsHas(d).then(function (ok) { return ok ? pageText(d).then(function (txt) { return pageMatches(l, txt); }) : false; })
+        .then(function (ok) { return ok ? d : next(); });
     }
     return next().then(function (found) {
-      l.web = { checked: Date.now(), found: found };
+      l.web = { checked: Date.now(), found: found, v: 2 };
       if (found && !l.info.site) { l.info.site = "https://" + found; l.info.siteAuto = true; return true; }
       return false;
     });
@@ -565,18 +581,23 @@ h1{font-size:clamp(28px,4.4vw,40px)}
   function webCheckStart() {
     if (webRunning || scanning) return;
     var now = Date.now();
+    /* Les résultats de la première version (sans lecture du contenu) n'étaient pas fiables : on les efface. */
+    Object.keys(store.leads).forEach(function (id) {
+      var l = store.leads[id];
+      if (l.web && l.web.v !== 2) { if (l.info && l.info.siteAuto) { l.info.site = ""; l.info.siteAuto = false; } delete l.web; }
+    });
     webQueue = Object.keys(store.leads).map(function (id) { return store.leads[id]; }).filter(function (l) {
       return l.info && !l.info.site && l.status !== "ferme" && (!l.web || now - l.web.checked > 30 * DAY);
     });
     webTotal = webQueue.length; webFound = 0;
     if (!webTotal) return;
-    webRunning = Math.min(4, webTotal);
+    webRunning = Math.min(3, webTotal);
     for (var n = 0; n < webRunning; n++) webWorker();
   }
   function webWorker() {
     var l = webQueue.shift();
     if (!l) { webRunning--; if (webRunning === 0) webDone(); return; }
-    checkLead(l).then(function (hit) { if (hit) webFound++; }, function () { /* on réessaiera plus tard */ }).then(function () {
+    checkLead(l).then(function (hit) { if (hit) webFound++; }, function () { /* lecteur saturé : on réessaiera au prochain passage */ }).then(function () {
       if (!scanning) setStatus("Vérification des sites existants : <b>" + (webTotal - webQueue.length) + " sur " + webTotal + "</b> commerces · " + webFound + " site" + (webFound > 1 ? "s" : "") + " trouvé" + (webFound > 1 ? "s" : ""));
       if ((webTotal - webQueue.length) % 15 === 0) { save(); render(); }
       webWorker();
