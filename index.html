@@ -328,6 +328,7 @@ h1{font-size:clamp(28px,4.4vw,40px)}
       if (p.https === 0) f.push({ w: 2, t: "Pas sécurisé (HTTPS)" });
     }
     if (p && p.error) f.push({ w: 2, t: "Site injoignable lors du test" });
+    if (l.info.siteAuto && !f.length) f.push({ w: 0, t: "Site trouvé automatiquement : vérifie-le" });
     return f;
   }
   function siteScore(l) { return siteFlags(l).reduce(function (a, f) { return a + f.w; }, 0); }
@@ -450,6 +451,7 @@ h1{font-size:clamp(28px,4.4vw,40px)}
       };
       /* « Nouveau » seulement si la commune avait déjà été scannée : le premier scan remplit la liste, il ne crée pas de nouveautés. */
       if (!lead) store.leads[id] = lead = { id: id, firstSeen: now, fresh: !!store.scans[zone.name], status: "nouveau", note: "" };
+      if (!info.site && lead.web && lead.web.found) { info.site = "https://" + lead.web.found; info.siteAuto = true; }
       lead.info = info;
       lead.lastSeen = now;
       lead.gone = false;
@@ -499,6 +501,7 @@ h1{font-size:clamp(28px,4.4vw,40px)}
       if (!quiet || added > 0 || failed.length) toast(msg + ".");
       if (!ok) setStatus("<b>Le dernier scan a échoué.</b> " + esc(lastError)); else updateStatus();
       if (queued) { var next = queued; queued = null; setTimeout(function () { scan(next, false); }, 500); }
+      else setTimeout(webCheckStart, 300);
     }
     step();
   }
@@ -515,6 +518,73 @@ h1{font-size:clamp(28px,4.4vw,40px)}
     if (h < 24) return "il y a " + h + " h";
     var d = Math.round(h / 24);
     return "il y a " + d + " jour" + (d > 1 ? "s" : "");
+  }
+  /* ---------- Vérification : le commerce a-t-il un site que la carte ne mentionne pas ? ----------
+     On teste les adresses probables (nom.be, nom.com, domaine de son e-mail) : d'abord si le nom de domaine existe,
+     puis si un site y répond. Résultat gardé 30 jours. */
+  var FREE_MAIL = /^(gmail|googlemail|hotmail|outlook|live|msn|yahoo|ymail|icloud|me|mac|skynet|telenet|proximus|belgacom|scarlet|voo|base|gmx|orange|free|laposte|aol|protonmail|proton|mail|hotmail\.be|yahoo\.fr)\./i;
+  var GENERIC_WORDS = /^(sprl|srl|sa|sc|scs|scrl|asbl|bv|bvba|nv|vzw|the|le|la|les|l|de|du|des|d|et|and|en|chez|au|aux|a|van|het|den|der|op|t|s|cabinet|dr|docteur|maison|boulangerie|patisserie|pharmacie|restaurant|resto|cafe|bar|brasserie|garage|salon|institut|atelier|boucherie|librairie|epicerie|coiffure|coiffeur|snack|pizzeria|traiteur|centre|center|shop|store|studio|agence|bureau|immo|immobilier|group|groupe|service|services|cleaning|nettoyage|home|funeral|funeraire|funerailles|pompes|funebres|kine|kinesitherapie|dentiste|dental|veterinaire|clinique|optique|opticien|fleurs|fleuriste|beauty|beaute|nails|hair|bio|sport|fitness|hotel|bakery)$/;
+  function slugWords(name) {
+    return String(name).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/&/g, " et ").replace(/['’]/g, "").replace(/[^a-z0-9]+/g, " ").trim().split(" ").filter(Boolean);
+  }
+  function domainCandidates(l) {
+    var out = [];
+    l.info.c.emails.forEach(function (e) { var d = String(e).split("@")[1]; if (d && !FREE_MAIL.test(d.toLowerCase() + ".")) out.push(d.toLowerCase()); });
+    var w = slugWords(l.info.name), sig = w.filter(function (x) { return !GENERIC_WORDS.test(x) && x.length > 1; });
+    var stems = [w.join(""), w.join("-")];
+    if (sig.length && sig.length < w.length) stems.push(sig.join(""), sig.join("-"));
+    if (sig.length && sig[0].length >= 4) stems.push(sig[0]);
+    stems.forEach(function (st) { if (st.length >= 4 && st.length <= 40) ["be", "com"].forEach(function (tld) { out.push(st + "." + tld); }); });
+    return out.filter(function (d, i) { return out.indexOf(d) === i; }).slice(0, 10);
+  }
+  function dnsHas(d) {
+    return fetch("https://dns.google/resolve?type=A&name=" + encodeURIComponent(d)).then(function (r) { return r.json(); })
+      .then(function (j) { return !!(j && j.Status === 0 && j.Answer && j.Answer.length); }, function () { return false; });
+  }
+  function webAnswers(d) {
+    var ctl = new AbortController(), t = setTimeout(function () { ctl.abort(); }, 7000);
+    return fetch("https://" + d + "/", { mode: "no-cors", signal: ctl.signal, cache: "no-store" })
+      .then(function () { return true; }, function () {
+        return fetch("http://www." + d + "/", { mode: "no-cors", signal: ctl.signal }).then(function () { return true; }, function () { return false; });
+      }).finally(function () { clearTimeout(t); });
+  }
+  function checkLead(l) {
+    var cands = domainCandidates(l), k = 0;
+    function next() {
+      if (k >= cands.length) return Promise.resolve("");
+      var d = cands[k++];
+      return dnsHas(d).then(function (ok) { return ok ? webAnswers(d) : false; }).then(function (ok) { return ok ? d : next(); });
+    }
+    return next().then(function (found) {
+      l.web = { checked: Date.now(), found: found };
+      if (found && !l.info.site) { l.info.site = "https://" + found; l.info.siteAuto = true; return true; }
+      return false;
+    });
+  }
+  var webQueue = [], webRunning = 0, webFound = 0, webTotal = 0;
+  function webCheckStart() {
+    if (webRunning || scanning) return;
+    var now = Date.now();
+    webQueue = Object.keys(store.leads).map(function (id) { return store.leads[id]; }).filter(function (l) {
+      return l.info && !l.info.site && l.status !== "ferme" && (!l.web || now - l.web.checked > 30 * DAY);
+    });
+    webTotal = webQueue.length; webFound = 0;
+    if (!webTotal) return;
+    webRunning = Math.min(4, webTotal);
+    for (var n = 0; n < webRunning; n++) webWorker();
+  }
+  function webWorker() {
+    var l = webQueue.shift();
+    if (!l) { webRunning--; if (webRunning === 0) webDone(); return; }
+    checkLead(l).then(function (hit) { if (hit) webFound++; }, function () { /* on réessaiera plus tard */ }).then(function () {
+      if (!scanning) setStatus("Vérification des sites existants : <b>" + (webTotal - webQueue.length) + " sur " + webTotal + "</b> commerces · " + webFound + " site" + (webFound > 1 ? "s" : "") + " trouvé" + (webFound > 1 ? "s" : ""));
+      if ((webTotal - webQueue.length) % 15 === 0) { save(); render(); }
+      webWorker();
+    });
+  }
+  function webDone() {
+    save(); render(); updateStatus();
+    if (webFound) toast(webFound + " commerce" + (webFound > 1 ? "s avaient" : " avait") + " en fait déjà un site : déplacé" + (webFound > 1 ? "s" : "") + " vers « Sites à refaire » (coche « Montrer aussi les sites sans défaut repéré » pour les voir).");
   }
   function updateStatus() {
     if (scanning) return;
@@ -842,6 +912,7 @@ h1{font-size:clamp(28px,4.4vw,40px)}
   render();
   updateStatus();
   setTimeout(autoTick, 800);
+  setTimeout(webCheckStart, 2500);
   setInterval(autoTick, 5 * 60 * 1000);
 })();
 </script>
