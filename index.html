@@ -413,8 +413,36 @@ h1{font-size:clamp(28px,4.4vw,40px)}
   var store = { leads: {}, scans: {}, zones: DEFAULT_ZONES.slice(), auto: true };
   try { var raw = localStorage.getItem(KEY); if (raw) { var s = JSON.parse(raw); if (s && s.leads) store = Object.assign(store, s); } } catch (e) { /* mémoire indisponible */ }
   /* Les médecins déjà enregistrés sont retirés (ils n'ont pas besoin de site). */
-  Object.keys(store.leads).forEach(function (id) { var i = store.leads[id].info; if (i && /^(doctors?|clinic|hospital)$/.test(i.rawType || "")) delete store.leads[id]; });
-  function save() { try { localStorage.setItem(KEY, JSON.stringify(store)); } catch (e) { toast("Impossible d'enregistrer dans ce navigateur : tes suivis seront perdus à la fermeture."); } }
+  function dropDoctors() { Object.keys(store.leads).forEach(function (id) { var i = store.leads[id].info; if (i && /^(doctors?|clinic|hospital)$/.test(i.rawType || "")) delete store.leads[id]; }); }
+  dropDoctors();
+  /* Sauvegarde dans IndexedDB (bien plus de place que localStorage, qui sature vers 5 Mo avec beaucoup de communes). */
+  var dbP = null;
+  function db() {
+    if (!dbP) dbP = new Promise(function (res, rej) {
+      if (!window.indexedDB) return rej(new Error("pas d'IndexedDB"));
+      var r = indexedDB.open("radar-commerces", 1);
+      r.onupgradeneeded = function () { r.result.createObjectStore("kv"); };
+      r.onsuccess = function () { res(r.result); };
+      r.onerror = function () { rej(r.error); };
+    });
+    return dbP;
+  }
+  function dbGet(k) { return db().then(function (d) { return new Promise(function (res, rej) { var q = d.transaction("kv").objectStore("kv").get(k); q.onsuccess = function () { res(q.result); }; q.onerror = function () { rej(q.error); }; }); }); }
+  function dbSet(k, v) { return db().then(function (d) { return new Promise(function (res, rej) { var tx = d.transaction("kv", "readwrite"); tx.objectStore("kv").put(v, k); tx.oncomplete = function () { res(); }; tx.onerror = tx.onabort = function () { rej(tx.error); }; }); }); }
+  var saveTimer = null, saveWarned = false;
+  function save() {
+    if (saveTimer) return; /* une écriture est déjà prévue : elle prendra l'état le plus récent */
+    saveTimer = setTimeout(function () {
+      saveTimer = null;
+      var json = JSON.stringify(store);
+      dbSet(KEY, json).then(function () {
+        try { localStorage.removeItem(KEY); } catch (e) { /* rien */ }
+      }, function () {
+        try { localStorage.setItem(KEY, json); } catch (e) { if (!saveWarned) { saveWarned = true; toast("Impossible d'enregistrer dans ce navigateur : tes suivis seront perdus à la fermeture."); } }
+      });
+    }, 300);
+  }
+  window.addEventListener("pagehide", function () { if (saveTimer) { clearTimeout(saveTimer); dbSet(KEY, JSON.stringify(store)).catch(function () {}); } });
 
   /* ---------- Requête OpenStreetMap ---------- */
   function query(b) {
@@ -1089,11 +1117,23 @@ h1{font-size:clamp(28px,4.4vw,40px)}
     var due = store.zones.filter(function (n) { return !store.scans[n] || Date.now() - store.scans[n] > HOUR; });
     if (due.length) scan(due, true); else updateStatus();
   }
-  render();
-  updateStatus();
-  setTimeout(autoTick, 800);
-  setTimeout(webCheckStart, 2500);
-  setInterval(autoTick, 5 * 60 * 1000);
+  /* Démarrage : on lit d'abord IndexedDB ; s'il est vide, on y recopie l'ancienne sauvegarde localStorage. */
+  function boot() {
+    render();
+    updateStatus();
+    setTimeout(autoTick, 800);
+    setTimeout(webCheckStart, 2500);
+    setInterval(autoTick, 5 * 60 * 1000);
+  }
+  var booted = false;
+  function bootOnce() { if (!booted) { booted = true; boot(); } }
+  setTimeout(bootOnce, 8000);
+  dbGet(KEY).then(function (v) {
+    if (booted) return;
+    if (v) { var s2 = JSON.parse(v); if (s2 && s2.leads) { store = Object.assign({ leads: {}, scans: {}, zones: DEFAULT_ZONES.slice(), auto: true }, s2); dropDoctors(); } }
+    else if (Object.keys(store.leads).length) save();
+    bootOnce();
+  }, bootOnce);
 })();
 </script>
 </body>
