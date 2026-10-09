@@ -30,6 +30,7 @@
   --new:#F5B544; --new-soft:#3A2D12; --warn:#F08A79; --warn-soft:#3B1F1B; --ok:#6FD596; --ok-soft:#173523;
   --chip:#222C45; color-scheme:dark}
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 html{-webkit-text-size-adjust:100%}
 body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 var(--body)}
 button,input,select,textarea{font:inherit;color:inherit}
@@ -75,6 +76,15 @@ h1{font-size:clamp(28px,4.4vw,40px)}
 .tab[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--accent)}
 .tab.wa[aria-selected="true"]{border-bottom-color:var(--ok)}
 .tab.wa b{background:var(--ok-soft);color:var(--ok)}
+.tab.site b{background:var(--warn-soft);color:var(--warn)}
+.tab.site[aria-selected="true"]{border-bottom-color:var(--warn)}
+.pill.flaw{background:var(--warn-soft);color:var(--warn)}
+.sitebar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:4px}
+.sitebar .url{font-family:var(--mono);font-size:12.5px;color:var(--muted);overflow-wrap:anywhere}
+.key{margin-top:28px;padding:14px 16px;display:grid;gap:8px;max-width:720px}
+.key input{min-height:36px;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);font-family:var(--mono);font-size:13px;width:100%}
+.key summary{cursor:pointer;font-weight:700}
+.key p{margin:0;color:var(--muted);font-size:13.5px}
 
 .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:16px}
 .stat{padding:12px 14px}
@@ -124,7 +134,7 @@ h1{font-size:clamp(28px,4.4vw,40px)}
   <header class="top">
     <div>
       <h1><span class="radar" aria-hidden="true"></span>Radar Commerces</h1>
-      <p class="sub">Les commerces et indépendants du Brabant wallon, de Bruxelles et des environs de Rhode qui n'ont pas de site web, avec leurs coordonnées. Source : OpenStreetMap.</p>
+      <p class="sub">Les commerces et indépendants du Brabant wallon, de Bruxelles et des environs de Rhode qui n'ont pas de site web, ou un site à refaire, avec leurs coordonnées. Source : OpenStreetMap.</p>
     </div>
     <div class="cmd-row">
       <button class="btn" id="exportBtn" type="button">Exporter (Excel)</button>
@@ -152,7 +162,8 @@ h1{font-size:clamp(28px,4.4vw,40px)}
   <div class="tabs" role="tablist" aria-label="Moyen de contact">
     <button class="tab wa" role="tab" type="button" data-tab="wa" aria-selected="true">WhatsApp <b id="nWa">0</b></button>
     <button class="tab" role="tab" type="button" data-tab="mail" aria-selected="false">E-mail <b id="nMail">0</b></button>
-    <button class="tab" role="tab" type="button" data-tab="all" aria-selected="false">Tous <b id="nAll">0</b></button>
+    <button class="tab" role="tab" type="button" data-tab="all" aria-selected="false">Tous sans site <b id="nAll">0</b></button>
+    <button class="tab site" role="tab" type="button" data-tab="site" aria-selected="false">Sites à refaire <b id="nSite">0</b></button>
   </div>
   <section class="filters" aria-label="Filtres">
     <input type="search" id="q" placeholder="Chercher un nom, une rue, un métier…" aria-label="Chercher">
@@ -169,11 +180,18 @@ h1{font-size:clamp(28px,4.4vw,40px)}
     </select>
     <label class="toggle"><input type="checkbox" id="fContact" checked> Avec contact seulement</label>
     <label class="toggle"><input type="checkbox" id="fNew"> Nouveaux seulement</label>
+    <label class="toggle" id="fAllSitesWrap" hidden><input type="checkbox" id="fAllSites"> Montrer aussi les sites sans défaut repéré</label>
+    <button class="btn btn-sm" id="psiBatch" type="button" hidden>Noter les 10 premiers sites</button>
   </section>
   <p class="count" id="count"></p>
   <div class="list" id="list"></div>
   <div class="more"><button class="btn" id="moreBtn" type="button" hidden>Afficher plus</button></div>
 
+  <details class="panel key" id="keyBox">
+    <summary>Notation automatique des sites (facultatif)</summary>
+    <p>Avec une clé gratuite Google PageSpeed, l'application note elle-même chaque site : vitesse sur téléphone, adaptation au mobile, référencement. Sans clé, le bouton « Tester le site » ouvre l'analyse Google dans un nouvel onglet. La clé reste dans ce navigateur.</p>
+    <input id="psiKey" type="text" autocomplete="off" spellcheck="false" placeholder="Colle ta clé ici (commence par AIza…)" aria-label="Clé Google PageSpeed">
+  </details>
   <p class="foot">« Sans site » veut dire qu'aucun site n'est indiqué sur OpenStreetMap : vérifie avec le lien Google avant d'appeler. Un numéro en 04… est un GSM, souvent sur WhatsApp, sans garantie. Tes suivis et tes notes restent dans ce navigateur, sur cet ordinateur. Données © les contributeurs d'OpenStreetMap (licence ODbL).</p>
 </div>
 <div class="toast" id="toast" hidden></div>
@@ -284,6 +302,33 @@ h1{font-size:clamp(28px,4.4vw,40px)}
   function hasWebsite(t) {
     return ["website", "contact:website", "url", "contact:url", "brand:website"].some(function (k) { return t[k]; });
   }
+  function siteOf(t) {
+    var keys = ["website", "contact:website", "url", "contact:url"];
+    for (var k = 0; k < keys.length; k++) if (t[keys[k]]) return String(t[keys[k]]).split(";")[0].trim();
+    return "";
+  }
+  function siteHref(u) { return /^https?:\/\//i.test(u) ? u : "http://" + u; }
+  var BUILDERS = /(wixsite\.com|wix\.com|jimdo|webnode|weebly|site123|godaddysites|business\.site|blogspot\.|wordpress\.com|e-monsite|over-blog|strikingly|carrd\.co|webador|simplesite|mystrikingly|wifeo|sitew\.|ueniweb|squarespace\.com|onepage|one\.me)/i;
+  var LISTINGS = /(pagesdor\.be|goudengids\.be|infobel|1307\.be|cylex|yelp\.|tripadvisor|google\.com\/maps|maps\.app\.goo|treatwell|doctoranytime|resengo|thefork|lafourchette)/i;
+  /* Les défauts visibles d'un site, du plus grave au moins grave. */
+  function siteFlags(l) {
+    var u = (l.info && l.info.site) || "", f = [];
+    if (!u) return f;
+    if (/(facebook\.com|fb\.me|instagram\.com|linktr\.ee)/i.test(u)) f.push({ w: 3, t: "Pas de vrai site : une page Facebook ou Instagram" });
+    else if (LISTINGS.test(u)) f.push({ w: 3, t: "Pas de vrai site : une fiche d'annuaire" });
+    else if (BUILDERS.test(u)) f.push({ w: 2, t: "Site gratuit (" + (u.match(BUILDERS)[1].replace(/\\/g, "").split(".")[0]) + ")" });
+    if (/^http:\/\//i.test(u)) f.push({ w: 1, t: "Lien sans HTTPS (pas de cadenas)" });
+    var p = l.psi;
+    if (p && !p.error) {
+      if (p.mobile === 0) f.push({ w: 3, t: "Pas adapté au téléphone" });
+      if (p.perf != null && p.perf < 0.5) f.push({ w: 2, t: "Lent sur téléphone (" + Math.round(p.perf * 100) + "/100)" });
+      if (p.seo != null && p.seo < 0.8) f.push({ w: 1, t: "Mal référencé sur Google (" + Math.round(p.seo * 100) + "/100)" });
+      if (p.https === 0) f.push({ w: 2, t: "Pas sécurisé (HTTPS)" });
+    }
+    if (p && p.error) f.push({ w: 2, t: "Site injoignable lors du test" });
+    return f;
+  }
+  function siteScore(l) { return siteFlags(l).reduce(function (a, f) { return a + f.w; }, 0); }
   function isChain(t) {
     if (t.brand || t["brand:wikidata"] || t["operator:wikidata"]) return true;
     return CHAINS.test(String(t.name || "").trim());
@@ -377,10 +422,9 @@ h1{font-size:clamp(28px,4.4vw,40px)}
       if (!t.name) return;
       var id = e.type.charAt(0) + e.id;
       var lead = store.leads[id];
-      if (hasWebsite(t) || isChain(t)) {
-        if (lead && lead.status !== "asite" && hasWebsite(t)) { lead.status = "asite"; lead.auto = "Un site a été ajouté sur OpenStreetMap"; }
-        return;
-      }
+      if (isChain(t)) return;
+      var site = siteOf(t);
+      if (lead && lead.auto && site) { lead.auto = ""; if (lead.status === "asite") lead.status = "nouveau"; }
       found[id] = true;
       var lat = e.lat || (e.center && e.center.lat), lon = e.lon || (e.center && e.center.lon);
       var addr = [[t["addr:street"], t["addr:housenumber"]].filter(Boolean).join(" "), [t["addr:postcode"], t["addr:city"]].filter(Boolean).join(" ")].filter(Boolean).join(", ");
@@ -389,7 +433,7 @@ h1{font-size:clamp(28px,4.4vw,40px)}
       var keep = lead && lead.info && lead.info.zone !== zone.name && !(t["addr:city"] && zone.name.toLowerCase().indexOf(String(t["addr:city"]).toLowerCase().split(/[ -]/)[0]) === 0);
       var info = {
         name: String(t.name).trim(), kind: kindOf(t), group: groupOf(t), addr: addr, zone: keep ? lead.info.zone : zone.name, region: keep ? lead.info.region : zone.region,
-        lat: lat, lon: lon, hours: t.opening_hours || "", c: contactsOf(t)
+        lat: lat, lon: lon, hours: t.opening_hours || "", c: contactsOf(t), site: site
       };
       /* « Nouveau » seulement si la commune avait déjà été scannée : le premier scan remplit la liste, il ne crée pas de nouveautés. */
       if (!lead) store.leads[id] = lead = { id: id, firstSeen: now, fresh: !!store.scans[zone.name], status: "nouveau", note: "" };
@@ -498,7 +542,7 @@ h1{font-size:clamp(28px,4.4vw,40px)}
   function hasMail(l) { return l.info.c.emails.length > 0; }
   var tab = "wa";
   try { tab = localStorage.getItem(KEY + ".tab") || "wa"; } catch (e) { /* rien */ }
-  var STATUS = [["nouveau", "Pas encore contacté"], ["contacte", "Contacté"], ["interesse", "Intéressé"], ["refus", "Pas intéressé"], ["asite", "A déjà un site"]];
+  var STATUS = [["nouveau", "Pas encore contacté"], ["contacte", "Contacté"], ["interesse", "Intéressé"], ["refus", "Pas intéressé"], ["asite", "A déjà un bon site"]];
   var shown = 60;
 
   function filtered() {
@@ -506,6 +550,8 @@ h1{font-size:clamp(28px,4.4vw,40px)}
     var needContact = $("fContact").checked, onlyNew = $("fNew").checked;
     return Object.keys(store.leads).map(function (id) { return store.leads[id]; }).filter(function (l) {
       var i = l.info; if (!i) return false;
+      if (tab === "site") { if (!i.site) return false; if (!$("fAllSites").checked && !siteScore(l)) return false; }
+      else if (i.site) return false;
       if (tab === "wa" && !hasWa(l)) return false;
       if (tab === "mail" && !hasMail(l)) return false;
       if (fz && i.zone !== fz) return false;
@@ -519,7 +565,7 @@ h1{font-size:clamp(28px,4.4vw,40px)}
     }).sort(function (a, b) {
       var order = { interesse: 0, contacte: 1, nouveau: 2, refus: 3, asite: 4 };
       /* Priorité : déjà en discussion, puis WhatsApp, puis e-mail, puis les plus récents. */
-      return (order[a.status] - order[b.status]) || (hasWa(b) - hasWa(a)) || (hasMail(b) - hasMail(a)) || (b.firstSeen - a.firstSeen) || a.info.name.localeCompare(b.info.name, "fr");
+      return (order[a.status] - order[b.status]) || (tab === "site" ? siteScore(b) - siteScore(a) : 0) || (hasWa(b) - hasWa(a)) || (hasMail(b) - hasMail(a)) || (b.firstSeen - a.firstSeen) || a.info.name.localeCompare(b.info.name, "fr");
     });
   }
 
@@ -541,6 +587,10 @@ h1{font-size:clamp(28px,4.4vw,40px)}
           (isNew ? '<span class="pill new">Nouveau · ' + esc(ago(l.firstSeen)) + "</span>" : "") +
           (l.gone ? '<span class="pill gone">Plus sur la carte au dernier scan</span>' : "") +
           (l.auto ? '<span class="pill gone">' + esc(l.auto) + "</span>" : "") + "</div>" +
+        (i.site ? '<div class="sitebar"><a class="ct" href="' + esc(siteHref(i.site)) + '" target="_blank" rel="noopener">Voir le site</a><a class="ct" href="https://pagespeed.web.dev/analysis?url=' + encodeURIComponent(siteHref(i.site)) + '&form_factor=mobile" target="_blank" rel="noopener">Tester le site</a>' +
+          (psiKey() ? '<button class="btn btn-sm" type="button" data-psi="' + esc(l.id) + '">' + (l.psi ? "Re-noter" : "Noter automatiquement") + "</button>" : "") +
+          '<span class="url">' + esc(i.site) + "</span></div>" +
+          '<div class="meta">' + (siteFlags(l).map(function (f) { return '<span class="pill flaw">' + esc(f.t) + "</span>"; }).join("") || (l.psi ? '<span class="pill">Note Google correcte</span>' : '<span>Aucun défaut visible sans test : clique sur « Tester le site »</span>')) + "</div>" : "") +
         '<div class="contacts">' + phones + mails + social + none + "</div>" +
         '<div class="links"><a href="https://www.google.com/search?q=' + gq + '" target="_blank" rel="noopener">Vérifier sur Google</a>' +
           '<a href="https://www.google.com/maps/search/?api=1&query=' + gq + '" target="_blank" rel="noopener">Google Maps</a>' +
@@ -558,7 +608,8 @@ h1{font-size:clamp(28px,4.4vw,40px)}
   function render() {
     renderZones();
     var all = Object.keys(store.leads).map(function (id) { return store.leads[id]; }).filter(function (l) { return l.info; });
-    var active = all.filter(function (l) { return l.status !== "asite"; });
+    var withSite = all.filter(function (l) { return l.info.site && l.status !== "asite" && l.status !== "refus"; });
+    var active = all.filter(function (l) { return l.status !== "asite" && !l.info.site; });
     
     $("sTotal").textContent = active.length;
     $("sNew").textContent = active.filter(isFresh).length;
@@ -568,6 +619,9 @@ h1{font-size:clamp(28px,4.4vw,40px)}
     $("nWa").textContent = open.filter(hasWa).length;
     $("nMail").textContent = open.filter(hasMail).length;
     $("nAll").textContent = open.length;
+    $("nSite").textContent = withSite.filter(function (l) { return siteScore(l) > 0; }).length;
+    $("fAllSitesWrap").hidden = tab !== "site";
+    $("psiBatch").hidden = tab !== "site" || !psiKey();
     Array.prototype.forEach.call(document.querySelectorAll(".tab"), function (b) { b.setAttribute("aria-selected", b.getAttribute("data-tab") === tab ? "true" : "false"); });
 
     var cats = {};
@@ -596,10 +650,46 @@ h1{font-size:clamp(28px,4.4vw,40px)}
     var l = store.leads[e.target.closest(".lead").getAttribute("data-id")]; if (!l) return;
     l.note = e.target.value; clearTimeout(save.t); save.t = setTimeout(save, 400);
   });
-  ["q", "fZone", "fCat", "fStatus", "fContact", "fNew"].forEach(function (id) {
+  ["q", "fZone", "fCat", "fStatus", "fContact", "fNew", "fAllSites"].forEach(function (id) {
     $(id).addEventListener(id === "q" ? "input" : "change", function () { shown = 60; render(); });
   });
   $("moreBtn").addEventListener("click", function () { shown += 60; render(); });
+
+  /* ---------- Notation Google PageSpeed (avec la clé de l'utilisateur) ---------- */
+  function psiKey() { try { return localStorage.getItem(KEY + ".psikey") || ""; } catch (e) { return ""; } }
+  $("psiKey").value = psiKey();
+  $("psiKey").addEventListener("change", function () {
+    try { localStorage.setItem(KEY + ".psikey", $("psiKey").value.trim()); } catch (e) { /* rien */ }
+    toast($("psiKey").value.trim() ? "Clé enregistrée : le bouton « Noter automatiquement » apparaît sur les sites." : "Clé retirée."); render();
+  });
+  function psi(l) {
+    var url = "https://www.googleapis.com/pagespeedonline/v5/runPagespeed?strategy=mobile&category=performance&category=seo&key=" + encodeURIComponent(psiKey()) + "&url=" + encodeURIComponent(siteHref(l.info.site));
+    return fetch(url).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); }).then(function (res) {
+      if (!res.ok) {
+        var m = (res.j && res.j.error && res.j.error.message) || "erreur";
+        if (/API key|quota|PERMISSION|disabled/i.test(m)) throw new Error("La clé Google est refusée ou son quota est épuisé (" + m.slice(0, 120) + ")");
+        l.psi = { error: m.slice(0, 160), at: Date.now() }; return;
+      }
+      var lr = res.j.lighthouseResult || {}, c = lr.categories || {}, a = lr.audits || {};
+      l.psi = { perf: c.performance && c.performance.score, seo: c.seo && c.seo.score, mobile: a.viewport ? a.viewport.score : null, https: a["is-on-https"] ? a["is-on-https"].score : null, at: Date.now() };
+    });
+  }
+  $("list").addEventListener("click", function (e) {
+    var b = e.target.closest("[data-psi]"); if (!b) return;
+    var l = store.leads[b.getAttribute("data-psi")]; if (!l) return;
+    b.disabled = true; b.textContent = "Analyse… (20 s environ)";
+    psi(l).then(function () { save(); render(); }, function (err) { toast(err.message); b.disabled = false; b.textContent = "Noter automatiquement"; });
+  });
+  $("psiBatch").addEventListener("click", function () {
+    var todo = filtered().filter(function (l) { return !l.psi; }).slice(0, 10), done = 0, btn = $("psiBatch");
+    if (!todo.length) { toast("Tous les sites affichés sont déjà notés."); return; }
+    btn.disabled = true;
+    (function next() {
+      if (done >= todo.length) { btn.disabled = false; btn.textContent = "Noter les 10 premiers sites"; save(); render(); toast(done + " sites notés."); return; }
+      btn.textContent = "Notation " + (done + 1) + " sur " + todo.length + "…";
+      psi(todo[done]).then(function () { done++; save(); next(); }, function (err) { btn.disabled = false; btn.textContent = "Noter les 10 premiers sites"; save(); render(); toast(err.message); });
+    })();
+  });
   document.querySelector(".tabs").addEventListener("click", function (e) {
     var b = e.target.closest(".tab"); if (!b) return;
     tab = b.getAttribute("data-tab"); shown = 60;
@@ -616,10 +706,10 @@ h1{font-size:clamp(28px,4.4vw,40px)}
   $("exportBtn").addEventListener("click", function () {
     var rows = filtered();
     if (!rows.length) { toast("Aucune fiche à exporter avec ces filtres."); return; }
-    var head = ["Nom", "Type", "Adresse", "Commune", "Région", "Téléphones", "WhatsApp probable", "E-mails", "Réseaux sociaux", "Suivi", "Note", "Trouvé le", "Lien Google Maps"];
+    var head = ["Nom", "Type", "Adresse", "Commune", "Région", "Site actuel", "Défauts du site", "Téléphones", "WhatsApp probable", "E-mails", "Réseaux sociaux", "Suivi", "Note", "Trouvé le", "Lien Google Maps"];
     var lines = [head].concat(rows.map(function (l) {
       var i = l.info, st = STATUS.filter(function (s) { return s[0] === l.status; })[0];
-      return [i.name, i.kind, i.addr, i.zone, i.region,
+      return [i.name, i.kind, i.addr, i.zone, i.region, i.site || "", siteFlags(l).map(function (f) { return f.t; }).join(" / "),
         i.c.phones.map(function (p) { return prettyPhone(p.num); }).join(" / "),
         i.c.phones.filter(function (p) { return p.mobile || p.wa; }).map(function (p) { return prettyPhone(p.num); }).join(" / "),
         i.c.emails.join(" / "), i.c.social.map(function (s) { return s.url; }).join(" / "),
