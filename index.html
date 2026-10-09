@@ -593,6 +593,7 @@ h1{font-size:clamp(28px,4.4vw,40px)}
     var social = i.c.social.map(function (s) { return '<a class="ct" href="' + esc(s.url) + '" target="_blank" rel="noopener">' + s.kind + "</a>"; }).join("");
     var none = phones || mails || social ? "" : '<span class="ct none">Pas de contact sur la carte : cherche sur Google</span>';
     var gq = encodeURIComponent(i.name + " " + (i.addr || i.addrGuess || i.zone));
+    var gs = googleSearch(i), gm = mapsLink(i);
     return '<article class="panel lead' + (l.status === "refus" || l.status === "asite" || l.status === "ferme" ? " is-done" : "") + '" data-id="' + esc(l.id) + '">' +
       '<div class="lead-main">' +
         '<h2 class="lead-name">' + esc(i.name) + "</h2>" +
@@ -605,8 +606,8 @@ h1{font-size:clamp(28px,4.4vw,40px)}
           '<span class="url">' + esc(i.site) + "</span></div>" +
           '<div class="meta">' + (siteFlags(l).map(function (f) { return '<span class="pill flaw">' + esc(f.t) + "</span>"; }).join("") || (l.psi ? '<span class="pill">Note Google correcte</span>' : '<span>Aucun défaut visible sans test : clique sur « Tester le site »</span>')) + "</div>" : "") +
         '<div class="contacts">' + phones + mails + social + none + '<button class="btn btn-sm" type="button" data-copy="' + esc(l.id) + '">Copier le message</button></div>' +
-        '<div class="links"><a href="https://www.google.com/search?q=' + gq + '" target="_blank" rel="noopener">Vérifier sur Google</a>' +
-          '<a href="https://www.google.com/maps/search/?api=1&query=' + gq + '" target="_blank" rel="noopener">Google Maps</a>' +
+        '<div class="links"><a href="' + esc(gs) + '" target="_blank" rel="noopener">Vérifier sur Google</a>' +
+          '<a href="' + esc(gm) + '" target="_blank" rel="noopener">Google Maps</a>' +
           '<a href="https://www.openstreetmap.org/' + ({ n: "node", w: "way", r: "relation" }[l.id.charAt(0)]) + "/" + esc(l.id.slice(1)) + '" target="_blank" rel="noopener">Fiche OpenStreetMap</a>' +
           (i.hours ? '<span class="meta">Horaires : ' + esc(i.hours) + "</span>" : "") + "</div>" +
       "</div>" +
@@ -680,6 +681,16 @@ h1{font-size:clamp(28px,4.4vw,40px)}
     if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(done, function () { if (fallback()) done(); else toast("Copie impossible dans ce navigateur."); });
     else if (fallback()) done(); else toast("Copie impossible dans ce navigateur.");
   });
+  /* Liens Google qui visent ce commerce précis : le nom exact, sa commune, et sa position sur la carte. */
+  function cityOf(i) {
+    var a = i.addr || i.addrGuess || "", m = /\b(\d{4})\s+([^,(]+)/.exec(a);
+    return m ? m[1] + " " + m[2].trim() : i.zone;
+  }
+  function googleSearch(i) { return "https://www.google.com/search?q=" + encodeURIComponent('"' + i.name + '" ' + cityOf(i)); }
+  function mapsLink(i) {
+    if (i.lat && i.lon) return "https://www.google.com/maps/search/" + encodeURIComponent(i.name) + "/@" + (+i.lat).toFixed(6) + "," + (+i.lon).toFixed(6) + ",19z";
+    return "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(i.name + " " + (i.addr || i.addrGuess || i.zone));
+  }
   function isFresh(l) { return !!l.fresh && Date.now() - l.firstSeen < 7 * DAY; }
 
   function render() {
@@ -793,7 +804,7 @@ h1{font-size:clamp(28px,4.4vw,40px)}
         i.c.phones.filter(function (p) { return p.mobile || p.wa; }).map(function (p) { return prettyPhone(p.num); }).join(" / "),
         i.c.emails.join(" / "), i.c.social.map(function (s) { return s.url; }).join(" / "),
         st ? st[1] : l.status, l.note || "", new Date(l.firstSeen).toLocaleDateString("fr-BE"),
-        "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(i.name + " " + (i.addr || i.zone))];
+        mapsLink(i)];
     }));
     var csv = "﻿" + lines.map(function (r) { return r.map(function (v) { v = String(v == null ? "" : v); return /[";\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }).join(";"); }).join("\r\n");
     var a = document.createElement("a");
