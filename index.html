@@ -120,6 +120,8 @@ h1{font-size:clamp(28px,4.4vw,40px)}
 .trow .who{min-width:0;flex:1 1 240px}
 .trow .who b{font-size:16px}
 .trow .who span{display:block;color:var(--muted);font-size:13px}
+.trow .tsite{margin-top:2px;color:var(--muted);font-size:13px;overflow-wrap:anywhere}
+.trow .tsite a{font-family:var(--mono);font-size:12.5px}
 .trow.sent{opacity:.6}
 .btn-wa{background:var(--ok);border-color:var(--ok);color:#fff;min-height:44px;padding:8px 18px;font-size:15px}
 .btn-wa:hover{border-color:var(--ok);filter:brightness(1.08)}
@@ -967,7 +969,11 @@ h1{font-size:clamp(28px,4.4vw,40px)}
       html += '<div class="slot"><h3>' + hm(g.s[0]) + "–" + hm(g.s[1]) + (live ? ' <span class="pill now">C\'est le moment</span>' : past ? ' <span class="pill">Créneau passé, envoie quand tu peux</span>' : "") + "</h3>" +
         g.items.map(function (l) {
           var i = l.info, sent = D.sent[l.id], num = waNum(l);
-          return '<div class="panel trow' + (sent ? " sent" : "") + '"><div class="who"><b>' + esc(i.name) + "</b><span>" + esc(i.kind) + " · " + esc(i.zone) + (i.site ? " · site à refaire" : "") + " · " + esc(prettyPhone(num || "")) + "</span></div>" +
+          /* Le site actuel, pour le voir avant d'envoyer ; sans site connu, un lien pour vérifier sur Google. */
+          var siteLine = i.site
+            ? '<div class="tsite">Site actuel : <a href="' + esc(siteHref(i.site)) + '" target="_blank" rel="noopener">' + esc(i.site.replace(/^https?:\/\//i, "").replace(/\/$/, "")) + "</a>" + (i.siteAuto ? " <small>(trouvé automatiquement)</small>" : "") + "</div>"
+            : '<div class="tsite">Pas de site connu · <a href="' + esc(googleSearch(i)) + '" target="_blank" rel="noopener">Vérifier sur Google</a></div>';
+          return '<div class="panel trow' + (sent ? " sent" : "") + '"><div class="who"><b>' + esc(i.name) + "</b><span>" + esc(i.kind) + " · " + esc(i.zone) + (i.site ? " · site à refaire" : "") + " · " + esc(prettyPhone(num || "")) + "</span>" + siteLine + "</div>" +
             (sent ? '<span class="done">Envoyé ✓ ' + esc(sent) + "</span>" : "") +
             '<a class="btn btn-wa" href="' + esc(waHref(l, num)) + '" data-wa="' + esc(l.id) + '" data-num="' + esc(num) + '" target="radar_wa" rel="noopener">' + (sent ? "Rouvrir WhatsApp" : "Envoyer sur WhatsApp") + "</a></div>";
         }).join("") + "</div>";
