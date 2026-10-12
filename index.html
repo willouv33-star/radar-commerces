@@ -218,9 +218,8 @@ h1{font-size:clamp(28px,4.4vw,40px)}
   <div class="more"><button class="btn" id="moreBtn" type="button" hidden>Afficher plus</button></div>
 
   <details class="panel key" id="keyBox">
-    <summary>Clé Google : recherche des sites sur Google et notation</summary>
-    <p>Avec une clé Google, l'application cherche chaque commerce de la liste du jour sur Google Maps pour savoir s'il a déjà un site, puis analyse ce site (version mobile, mises à jour, design dépassé, vitesse). Sans clé, elle ne peut que deviner l'adresse du site à partir du nom.</p>
-    <p>Pour l'obtenir : sur console.cloud.google.com, crée un projet, active « Places API (New) » et « PageSpeed Insights API », puis crée une clé dans « Identifiants ». Google demande une carte bancaire, mais l'usage de l'app (15 commerces par jour) reste dans la partie gratuite. Conseil : limite la clé au site willouv33-star.github.io. La clé reste dans ce navigateur.</p>
+    <summary>Clé Google (facultative) : vitesse des sites</summary>
+    <p>Sans clé, l'application cherche déjà gratuitement sur le web si chaque commerce de la liste du jour a un site, puis analyse ce site (version mobile, mises à jour, design dépassé, page vide). Avec une clé Google, elle mesure en plus la vitesse sur téléphone (PageSpeed, gratuit, sans carte bancaire). Si la facturation est activée sur la clé, elle cherche aussi sur Google Maps. La clé reste dans ce navigateur.</p>
     <input id="psiKey" type="text" autocomplete="off" spellcheck="false" placeholder="Colle ta clé ici (commence par AIza…)" aria-label="Clé Google">
   </details>
   <p class="foot">« Sans site » veut dire qu'aucun site n'est indiqué sur OpenStreetMap : vérifie avec le lien Google avant d'appeler. Un numéro en 04… est un GSM, souvent sur WhatsApp, sans garantie. Tes suivis et tes notes restent dans ce navigateur, sur cet ordinateur. Données © les contributeurs d'OpenStreetMap (licence ODbL).</p>
@@ -520,6 +519,7 @@ h1{font-size:clamp(28px,4.4vw,40px)}
       /* « Nouveau » seulement si la commune avait déjà été scannée : le premier scan remplit la liste, il ne crée pas de nouveautés. */
       if (!lead) store.leads[id] = lead = { id: id, firstSeen: now, fresh: !!store.scans[zone.name], status: "nouveau", note: "" };
       if (!info.site && lead.gsite && lead.gsite.site) { info.site = lead.gsite.site; info.siteAuto = true; info.siteSrc = "google"; }
+      if (!info.site && lead.wsearch && lead.wsearch.site) { info.site = lead.wsearch.site; info.siteAuto = true; info.siteSrc = "web"; }
       if (!info.site && lead.web && lead.web.found && lead.web.v === 2) { info.site = "https://" + lead.web.found; info.siteAuto = true; }
       lead.info = info;
       lead.lastSeen = now;
@@ -1020,21 +1020,58 @@ h1{font-size:clamp(28px,4.4vw,40px)}
     /* Un lien en http:// : on regarde si le site répond aussi en https://. */
     var https = /^https:/i.test(url) ? Promise.resolve(true) : fetchWithTimeout(url.replace(/^http:/i, "https:"), 8000).then(function () { return true; }, function () { return false; });
     https = https.catch(function () { return false; });
-    var page = fetch("https://r.jina.ai/" + url, { headers: { "X-Return-Format": "html" } }).then(function (r) {
-      if (r.status === 429 || r.status >= 500) throw new Error("lecteur saturé");
-      return r.ok ? r.text() : null;
-    });
+    var page = reader(url, "html");
     return Promise.all([page, https]).then(function (res) {
       var a = res[0] == null ? { flags: [{ k: "dead", w: 3, t: "Site injoignable" }], year: 0 } : htmlFlags(res[0]);
       l.audit = { url: site, at: Date.now(), flags: a.flags, year: a.year, https: res[1] };
     });
   }
+  /* ---------- Recherche web gratuite (DuckDuckGo, lu par r.jina.ai) : sans clé et sans carte bancaire ---------- */
+  var DIRS = /(pagesdor|goudengids|infobel|1307\.be|cylex|yelp\.|tripadvisor|google\.|goo\.gl|bing\.com|duckduckgo|wikipedia|linkedin|youtube|tiktok|pinterest|twitter\.com|x\.com|waze|foursquare|opendi|kompass|companyweb|trends\.knack|cybo\.|hotfrog|horaires|heures\.be|openingstijden|ouvert|justacote|bizique|mapcarta|mapquest|here\.com|apple\.com|infonet\.be|northdata|societe\.com|starofservice|treatwell|booking\.com|airbnb|thefork|lafourchette|deliveroo|ubereats|takeaway|just-eat|resengo|doctoranytime|city\.be|annuaire|gouden|pages\.be|wikimapia|waze|trustpilot|facebook\.|instagram\.|fb\.me|linktr\.ee|amazon\.|ebay\.|2dehands|2ememain|immoweb|zimmo|logic-immo|reddit|quefaire|visitwallonia|brabantwallon\.be)/i;
+  function reader(url, fmt, tries) {
+    tries = tries || 0;
+    return fetch("https://r.jina.ai/" + url, { headers: { "X-Return-Format": fmt } }).then(function (r) {
+      /* Le lecteur gratuit accepte ~20 lectures par minute : on patiente et on réessaie. */
+      if ((r.status === 429 || r.status >= 500) && tries < 4) return new Promise(function (res) { setTimeout(res, 15000); }).then(function () { return reader(url, fmt, tries + 1); });
+      if (r.status === 429 || r.status >= 500) throw new Error("lecteur saturé");
+      return r.ok ? r.text() : null;
+    });
+  }
+  function nameInHost(l, u) {
+    var host = "", path = "";
+    try { var p = new URL(u); host = p.hostname.replace(/^www\./, ""); path = decodeURIComponent(p.pathname); } catch (e) { return false; }
+    var label = normTxt(/facebook|instagram/.test(host) ? path : host.split(".").slice(0, -1).join("")).replace(/[^a-z0-9]/g, "");
+    var w = slugWords(l.info.name), sig = w.filter(function (x) { return x.length >= 4 && !GENERIC_WORDS.test(x); });
+    return label.indexOf(w.join("")) >= 0 || (sig.length > 0 && sig.every(function (x) { return label.indexOf(x) >= 0; }));
+  }
+  function webSearch(l) {
+    var q = '"' + l.info.name + '" ' + cityOf(l.info).replace(/^\d{4}\s+/, "");
+    return reader("https://html.duckduckgo.com/html/?q=" + encodeURIComponent(q), "markdown").then(function (md) {
+      var urls = [];
+      String(md || "").replace(/uddg=([^&)\s]+)/g, function (m, u) { try { u = decodeURIComponent(u); } catch (e) { return m; } if (urls.indexOf(u) < 0) urls.push(u); return m; });
+      var social = urls.filter(function (u) { return /(facebook\.com|instagram\.com)\//i.test(u) && nameInHost(l, u); })[0] || "";
+      if (social) social = social.replace(/^(https?:\/\/[^\/]+\/(people\/[^\/]+\/\d+|p\/[^\/?#]+|[^\/?#]+)).*$/i, "$1");
+      /* Un vrai site : pas un annuaire, et soit son adresse contient le nom du commerce, soit c'est une page d'accueil ;
+         puis son contenu doit parler de ce commerce (téléphone, e-mail, ou nom avec la commune). */
+      var cands = urls.filter(function (u) {
+        if (DIRS.test(u)) return false;
+        var depth = 0; try { depth = new URL(u).pathname.split("/").filter(Boolean).length; } catch (e) { return false; }
+        return nameInHost(l, u) || depth <= 1;
+      }).slice(0, 3), k = 0;
+      function next() {
+        if (k >= cands.length) return Promise.resolve("");
+        var u = cands[k++];
+        return reader(u, "text").then(function (txt) { return txt && pageMatches(l, txt) ? u : next(); });
+      }
+      return next().then(function (site) { l.wsearch = { at: Date.now(), site: site || social, social: !site && !!social }; });
+    });
+  }
   function needsVerify(l) {
     if (!l || !l.info || l.status !== "nouveau" || (l.verifyFail && Date.now() - l.verifyFail < 10 * 60 * 1000)) return false;
-    if (!l.info.site) return !!psiKey() && !(l.gsite && Date.now() - l.gsite.at < 30 * DAY);
+    if (!l.info.site) return !(l.wsearch && Date.now() - l.wsearch.at < 30 * DAY);
     return !(l.audit && l.audit.url === l.info.site && Date.now() - l.audit.at < 30 * DAY);
   }
-  var verifyQueue = [], verifying = "", keyWarned = false;
+  var verifyQueue = [], verifying = "", keyWarned = false, placesOff = false;
   function verifyDaily(ids) {
     ids.forEach(function (id) { if (!store.daily.sent[id] && verifyQueue.indexOf(id) < 0 && needsVerify(store.leads[id])) verifyQueue.push(id); });
     verifyNext();
@@ -1049,9 +1086,16 @@ h1{font-size:clamp(28px,4.4vw,40px)}
     if (!needsVerify(l)) return verifyNext();
     verifying = l.id;
     var site = Promise.resolve();
-    if (!l.info.site && psiKey()) site = placesLookup(l).then(function () {
+    /* Google Places seulement si la clé a la facturation activée ; sinon, la recherche web gratuite suffit. */
+    if (!l.info.site && psiKey() && !placesOff && !(l.gsite && Date.now() - l.gsite.at < 30 * DAY)) site = placesLookup(l).then(function () {
       if (l.gsite.closed) { l.status = "ferme"; l.auto = "Fermé définitivement selon Google"; dropFromDaily(l, "fermé définitivement selon Google"); }
       else if (l.gsite.site) { l.info.site = l.gsite.site; l.info.siteAuto = true; l.info.siteSrc = "google"; }
+    }, function (err) { if (!err || !err.key) throw err; placesOff = true; });
+    site = site.then(function () {
+      if (l.info.site || l.status !== "nouveau") return;
+      return webSearch(l).then(function () {
+        if (l.wsearch.site) { l.info.site = l.wsearch.site; l.info.siteAuto = true; l.info.siteSrc = "web"; }
+      });
     });
     site.then(function () {
       if (!l.info.site || l.status !== "nouveau") return;
@@ -1072,14 +1116,17 @@ h1{font-size:clamp(28px,4.4vw,40px)}
   }
   function siteLineHTML(l) {
     var i = l.info, g = l.gsite, gs = '<a class="plain" href="' + esc(googleSearch(i)) + '" target="_blank" rel="noopener">Vérifier sur Google</a>';
-    if (verifying === l.id || verifyQueue.indexOf(l.id) >= 0) return '<div class="tsite">' + (i.site ? "Analyse du site " + esc(i.site.replace(/^https?:\/\//i, "").replace(/\/$/, "")) + "…" : "Recherche du site sur Google…") + "</div>";
+    if (verifying === l.id || verifyQueue.indexOf(l.id) >= 0) return '<div class="tsite">' + (i.site ? "Analyse du site " + esc(i.site.replace(/^https?:\/\//i, "").replace(/\/$/, "")) + "…" : "Recherche du site sur le web…") + "</div>";
     if (!i.site) {
       if (g && g.found) return '<div class="tsite"><span class="ok">Aucun site, confirmé par Google ✓</span> · <a class="plain" href="' + esc(g.maps) + '" target="_blank" rel="noopener">Fiche Google</a></div>';
-      if (g) return '<div class="tsite">Pas de site connu · introuvable sur Google Maps · ' + gs + "</div>";
+      if (l.wsearch) return '<div class="tsite"><span class="ok">Aucun site trouvé sur le web ✓</span> · ' + gs + "</div>";
       return '<div class="tsite">Pas de site connu · ' + gs + "</div>";
     }
     var flags = siteFlags(l).filter(function (f) { return f.w > 0; });
-    return '<div class="tsite">Site actuel : <a href="' + esc(siteHref(i.site)) + '" target="_blank" rel="noopener">' + esc(i.site.replace(/^https?:\/\//i, "").replace(/\/$/, "")) + "</a>" + (i.siteSrc === "google" ? " <small>(trouvé sur Google)</small>" : i.siteAuto ? " <small>(trouvé automatiquement)</small>" : "") + "</div>" +
+    var social = /(facebook\.com|fb\.me|instagram\.com)/i.test(i.site);
+    var shown = i.site.replace(/^https?:\/\//i, "").replace(/\/$/, "");
+    try { shown = decodeURIComponent(shown); } catch (e) { /* adresse laissée telle quelle */ }
+    return '<div class="tsite">' + (social ? "Pas de vrai site, seulement : " : "Site actuel : ") + '<a href="' + esc(siteHref(i.site)) + '" target="_blank" rel="noopener">' + esc(shown) + "</a>" + (i.siteSrc === "google" ? " <small>(trouvé sur Google)</small>" : i.siteSrc === "web" ? " <small>(trouvé sur le web)</small>" : i.siteAuto ? " <small>(trouvé automatiquement)</small>" : "") + "</div>" +
       (flags.length ? '<div class="flaws">' + flags.map(function (f) { return '<span class="pill flaw">' + esc(f.t) + "</span>"; }).join("") + "</div>" : "");
   }
   function renderToday() {
@@ -1095,7 +1142,6 @@ h1{font-size:clamp(28px,4.4vw,40px)}
     else if (!isToday) warn = "Pas de prospection le week-end ni le dimanche : voici la liste du prochain jour ouvrable.";
     var html = '<div class="panel today-head"><div><h2>' + esc(label) + "</h2><p>" + leads.length + " commerces à contacter · " + sentN + " envoyé" + (sentN > 1 ? "s" : "") + " · un clic ouvre WhatsApp avec le message prêt, le second l'envoie</p></div></div>";
     if (warn) html += '<p class="today-warn" role="status" style="margin-top:10px">' + esc(warn) + "</p>";
-    if (!psiKey()) html += '<p class="today-warn" style="margin-top:10px">Ajoute ta clé Google en bas de la page : l\'app cherchera elle-même sur Google si chaque commerce a déjà un site, et si ce site est à refaire.</p>';
     if (!leads.length) html += '<div class="panel empty" style="margin-top:10px"><h2>Rien à envoyer pour l\'instant</h2><p>Tous les commerces avec un GSM ont déjà été contactés, ou le scan n\'est pas terminé. Coche d\'autres communes et lance un scan pour en trouver de nouveaux.</p></div>';
     Object.keys(groups).sort(function (a, b) { return groups[a].s[0] - groups[b].s[0]; }).forEach(function (k) {
       var g = groups[k], live = isToday && mins >= g.s[0] && mins < g.s[1], past = isToday && mins >= g.s[1];
@@ -1185,7 +1231,6 @@ h1{font-size:clamp(28px,4.4vw,40px)}
   /* ---------- Notation Google PageSpeed (avec la clé de l'utilisateur) ---------- */
   function psiKey() { try { return localStorage.getItem(KEY + ".psikey") || ""; } catch (e) { return ""; } }
   $("psiKey").value = psiKey();
-  if (!psiKey()) $("keyBox").open = true;
   $("psiKey").addEventListener("change", function () {
     try { localStorage.setItem(KEY + ".psikey", $("psiKey").value.trim()); } catch (e) { /* rien */ }
     keyWarned = false;
