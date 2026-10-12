@@ -514,7 +514,7 @@ h1{font-size:clamp(28px,4.4vw,40px)}
       var keep = lead && lead.info && lead.info.zone !== zone.name && !(t["addr:city"] && zone.name.toLowerCase().indexOf(String(t["addr:city"]).toLowerCase().split(/[ -]/)[0]) === 0);
       var info = {
         name: String(t.name).trim(), kind: kindOf(t), group: groupOf(t), addr: addr, zone: keep ? lead.info.zone : zone.name, region: keep ? lead.info.region : zone.region,
-        lat: lat, lon: lon, hours: t.opening_hours || "", c: contactsOf(t), site: site, rawType: String(t.craft || t.shop || t.amenity || t.office || t.healthcare || "").split(";")[0]
+        lat: lat, lon: lon, hours: t.opening_hours || "", c: contactsOf(t), site: site, checked: t.check_date || t["survey:date"] || "", rawType: String(t.craft || t.shop || t.amenity || t.office || t.healthcare || "").split(";")[0]
       };
       /* « Nouveau » seulement si la commune avait déjà été scannée : le premier scan remplit la liste, il ne crée pas de nouveautés. */
       if (!lead) store.leads[id] = lead = { id: id, firstSeen: now, fresh: !!store.scans[zone.name], status: "nouveau", note: "" };
@@ -760,7 +760,8 @@ h1{font-size:clamp(28px,4.4vw,40px)}
         '<div class="meta"><span class="pill">' + esc(i.kind) + "</span><span data-addr=\"" + esc(l.id) + "\">" + addrText(l) + "</span><span>" + esc(i.zone) + "</span>" +
           (isNew ? '<span class="pill new">Nouveau · ' + esc(ago(l.firstSeen)) + "</span>" : "") +
           (l.gone ? '<span class="pill gone">Plus sur la carte au dernier scan</span>' : "") +
-          (l.auto ? '<span class="pill gone">' + esc(l.auto) + "</span>" : "") + "</div>" +
+          (l.auto ? '<span class="pill gone">' + esc(l.auto) + "</span>" : "") +
+          (isStale(l) ? '<span class="pill gone">Peut-être délaissé : rien en ligne depuis ' + esc(monthYear(lastActivity(l))) + "</span>" : "") + "</div>" +
         (i.site ? '<div class="sitebar"><a class="ct" href="' + esc(siteHref(i.site)) + '" target="_blank" rel="noopener">Voir le site</a><a class="ct" href="https://pagespeed.web.dev/analysis?url=' + encodeURIComponent(siteHref(i.site)) + '&form_factor=mobile" target="_blank" rel="noopener">Tester le site</a>' +
           (psiKey() ? '<button class="btn btn-sm" type="button" data-psi="' + esc(l.id) + '">' + (l.psi ? "Re-noter" : "Noter automatiquement") + "</button>" : "") +
           '<span class="url">' + esc(i.site) + "</span></div>" +
@@ -930,8 +931,8 @@ h1{font-size:clamp(28px,4.4vw,40px)}
   }
   function isFresh(l) { return !!l.fresh && Date.now() - l.firstSeen < 7 * DAY; }
 
-  /* ---------- Liste du jour : 15 WhatsApp à envoyer, rangés par meilleure heure ---------- */
-  var DAILY_N = 15;
+  /* ---------- Liste du jour : au moins 30 WhatsApp à envoyer, rangés par meilleure heure ---------- */
+  var DAILY_N = 30;
   function bxNow() { return new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Brussels" })); }
   function dayKey(d) { return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
   /* Le jour visé : aujourd'hui en semaine ; après 20h, le week-end ou un jour férié de fait, le prochain jour ouvrable. */
@@ -950,20 +951,22 @@ h1{font-size:clamp(28px,4.4vw,40px)}
   function dailyOk(l, wd) {
     /* Un site pas encore analysé peut entrer dans la liste : l'analyse dira s'il est à refaire. */
     var pending = l.info && l.info.site && !(l.audit && l.audit.url === l.info.site);
-    return l.info && !l.gone && l.status === "nouveau" && waNum(l) && (!l.info.site || siteScore(l) > 0 || pending) && timingOf(l).days.indexOf(wd) >= 0;
+    return l.info && !l.gone && l.status === "nouveau" && waNum(l) && !isStale(l) && (!l.info.site || siteScore(l) > 0 || pending) && (wd == null || timingOf(l).days.indexOf(wd) >= 0);
   }
   function dailyList() {
     var d = targetDay(), key = dayKey(d), wd = d.getDay();
     if (!store.daily || store.daily.date !== key) store.daily = { date: key, ids: [], sent: {} };
     var D = store.daily;
-    /* On garde ceux déjà choisis (même envoyés), on retire ceux qui ne conviennent plus, et on complète jusqu'à 15. */
-    D.ids = D.ids.filter(function (id) { var l = store.leads[id]; return l && l.info && (D.sent[id] || dailyOk(l, wd)); });
-    if (D.ids.length < DAILY_N) {
+    /* On garde ceux déjà choisis (même envoyés), on retire ceux qui ne conviennent plus, et on complète jusqu'à 30 :
+       d'abord avec ceux dont c'est le bon jour, puis, s'il en manque, avec les autres. */
+    D.ids = D.ids.filter(function (id) { var l = store.leads[id]; return l && l.info && (D.sent[id] || dailyOk(l, null)); });
+    [wd, null].forEach(function (day) {
+      if (D.ids.length >= DAILY_N) return;
       var taken = {}; D.ids.forEach(function (id) { taken[id] = 1; });
-      var pool = Object.keys(store.leads).map(function (id) { return store.leads[id]; }).filter(function (l) { return !taken[l.id] && dailyOk(l, wd); })
+      var pool = Object.keys(store.leads).map(function (id) { return store.leads[id]; }).filter(function (l) { return !taken[l.id] && dailyOk(l, day); })
         .sort(function (a, b) { return (!!a.info.site - !!b.info.site) || (isFresh(b) - isFresh(a)) || (siteScore(b) - siteScore(a)) || (b.firstSeen - a.firstSeen); });
       pool.slice(0, DAILY_N - D.ids.length).forEach(function (l) { D.ids.push(l.id); });
-    }
+    });
     return { date: d, today: key === dayKey(bxNow()), ids: D.ids, sent: D.sent };
   }
   function slotFor(l, isToday) {
@@ -1044,11 +1047,30 @@ h1{font-size:clamp(28px,4.4vw,40px)}
     var w = slugWords(l.info.name), sig = w.filter(function (x) { return x.length >= 4 && !GENERIC_WORDS.test(x); });
     return label.indexOf(w.join("")) >= 0 || (sig.length > 0 && sig.every(function (x) { return label.indexOf(x) >= 0; }));
   }
+  /* Ce que les résultats disent de l'activité : fermeture annoncée, et date de la dernière trace en ligne. */
+  var CLOSED_WEB = /(definitivement ferme|ferme definitivement|permanently closed|definitief gesloten|a ferme ses portes|ferme ses portes|cessation d.activite|faillite|en liquidation|commerce a remettre|fonds de commerce a (remettre|vendre)|closed down|n.existe plus)/;
+  function aboutLead(l, b) {
+    if (nameInHost(l, b.url)) return true;
+    var w = slugWords(l.info.name).filter(function (x) { return x.length > 1 && !GENERIC_WORDS.test(x); }), t = normTxt(b.text);
+    return w.length > 0 && w.every(function (x) { return t.indexOf(x) >= 0; });
+  }
   function webSearch(l) {
     var q = '"' + l.info.name + '" ' + cityOf(l.info).replace(/^\d{4}\s+/, "");
     return reader("https://html.duckduckgo.com/html/?q=" + encodeURIComponent(q), "markdown").then(function (md) {
+      var blocks = String(md || "").split(/\n(?=## \[)/).slice(1).map(function (b) {
+        var u = (/uddg=([^&)\s]+)/.exec(b) || [])[1] || "";
+        try { u = decodeURIComponent(u); } catch (e) { u = ""; }
+        return { url: u, date: (/\s(\d{4}-\d{2}-\d{2})T\d{2}:\d{2}/.exec(b) || [])[1] || "", text: b.replace(/\]\([^)]*\)/g, "]").replace(/[\[\]!*#]/g, " ").replace(/\s+/g, " ") };
+      }).filter(function (b) { return b.url && !/duckduckgo\.com/.test(b.url); });
+      var mine = blocks.filter(function (b) { return aboutLead(l, b); });
+      var shut = mine.filter(function (b) { return CLOSED_WEB.test(normTxt(b.text)); })[0];
+      /* Seules ses propres pages comptent pour l'activité (site, Facebook, Instagram, presse) : un annuaire se met à jour tout seul. */
+      var latest = mine.filter(function (b) { return !DIRS.test(b.url) || /(facebook|instagram)\.com/i.test(b.url); }).map(function (b) { return b.date; }).filter(Boolean).sort().pop() || "";
+      var found = { at: Date.now(), v: 2, site: "", social: false, latest: latest, closed: shut ? shut.url.split("/")[2].replace(/^www\./, "") : "" };
+      /* Le commerce a déjà un site (carte ou Google) : la recherche ne sert qu'à juger son activité. */
+      if (l.info.site || shut) { l.wsearch = found; return; }
       var urls = [];
-      String(md || "").replace(/uddg=([^&)\s]+)/g, function (m, u) { try { u = decodeURIComponent(u); } catch (e) { return m; } if (urls.indexOf(u) < 0) urls.push(u); return m; });
+      blocks.forEach(function (b) { if (urls.indexOf(b.url) < 0) urls.push(b.url); });
       var social = urls.filter(function (u) { return /(facebook\.com|instagram\.com)\//i.test(u) && nameInHost(l, u); })[0] || "";
       if (social) social = social.replace(/^(https?:\/\/[^\/]+\/(people\/[^\/]+\/\d+|p\/[^\/?#]+|[^\/?#]+)).*$/i, "$1");
       /* Un vrai site : pas un annuaire, et soit son adresse contient le nom du commerce, soit c'est une page d'accueil ;
@@ -1063,13 +1085,30 @@ h1{font-size:clamp(28px,4.4vw,40px)}
         var u = cands[k++];
         return reader(u, "text").then(function (txt) { return txt && pageMatches(l, txt) ? u : next(); });
       }
-      return next().then(function (site) { l.wsearch = { at: Date.now(), site: site || social, social: !site && !!social }; });
+      return next().then(function (site) { found.site = site || social; found.social = !site && !!social; l.wsearch = found; });
     });
+  }
+  /* Dernière trace d'activité connue : résultats web datés, copyright du site, vérification sur place dans OpenStreetMap. */
+  function lastActivity(l) {
+    var d = [];
+    if (l.wsearch && l.wsearch.latest) d.push(l.wsearch.latest);
+    if (l.audit && l.audit.url === l.info.site && l.audit.year) d.push(l.audit.year + "-12-31");
+    if (/^\d{4}(-\d{2})?/.test(l.info.checked || "")) d.push(String(l.info.checked).slice(0, 10));
+    return d.sort().pop() || "";
+  }
+  var STALE_MONTHS = 18;
+  function isStale(l) {
+    var last = lastActivity(l);
+    return !!last && (Date.now() - new Date(last).getTime()) / (30.4 * DAY) > STALE_MONTHS;
+  }
+  function monthYear(iso) {
+    var p = String(iso).split("-");
+    return (p[1] ? ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"][+p[1] - 1] + " " : "") + p[0];
   }
   function needsVerify(l) {
     if (!l || !l.info || l.status !== "nouveau" || (l.verifyFail && Date.now() - l.verifyFail < 10 * 60 * 1000)) return false;
-    if (!l.info.site) return !(l.wsearch && Date.now() - l.wsearch.at < 30 * DAY);
-    return !(l.audit && l.audit.url === l.info.site && Date.now() - l.audit.at < 30 * DAY);
+    if (!(l.wsearch && l.wsearch.v === 2 && Date.now() - l.wsearch.at < 30 * DAY)) return true;
+    return !!l.info.site && !(l.audit && l.audit.url === l.info.site && Date.now() - l.audit.at < 30 * DAY);
   }
   var verifyQueue = [], verifying = "", keyWarned = false, placesOff = false;
   function verifyDaily(ids) {
@@ -1092,9 +1131,10 @@ h1{font-size:clamp(28px,4.4vw,40px)}
       else if (l.gsite.site) { l.info.site = l.gsite.site; l.info.siteAuto = true; l.info.siteSrc = "google"; }
     }, function (err) { if (!err || !err.key) throw err; placesOff = true; });
     site = site.then(function () {
-      if (l.info.site || l.status !== "nouveau") return;
+      if (l.status !== "nouveau" || (l.wsearch && l.wsearch.v === 2 && Date.now() - l.wsearch.at < 30 * DAY)) return;
       return webSearch(l).then(function () {
-        if (l.wsearch.site) { l.info.site = l.wsearch.site; l.info.siteAuto = true; l.info.siteSrc = "web"; }
+        if (l.wsearch.closed) { l.status = "ferme"; l.auto = "Semble fermé (d'après " + l.wsearch.closed + ")"; dropFromDaily(l, "semble fermé d'après " + l.wsearch.closed); return; }
+        if (!l.info.site && l.wsearch.site) { l.info.site = l.wsearch.site; l.info.siteAuto = true; l.info.siteSrc = "web"; }
       });
     });
     site.then(function () {
@@ -1105,6 +1145,8 @@ h1{font-size:clamp(28px,4.4vw,40px)}
       }).then(function () {
         if (!siteScore(l)) { l.status = "asite"; l.auto = "A déjà un site correct (vérifié automatiquement)"; dropFromDaily(l, "a déjà un site correct"); }
       });
+    }).then(function () {
+      if (l.status === "nouveau" && isStale(l)) dropFromDaily(l, "rien en ligne depuis " + monthYear(lastActivity(l)) + " : peut-être fermé ou délaissé");
     }).catch(function (err) {
       if (err && err.key) { verifyQueue = []; if (!keyWarned) { keyWarned = true; toast(err.message); } }
       else l.verifyFail = Date.now();
@@ -1115,8 +1157,14 @@ h1{font-size:clamp(28px,4.4vw,40px)}
     });
   }
   function siteLineHTML(l) {
+    if (verifying === l.id || verifyQueue.indexOf(l.id) >= 0) return '<div class="tsite">' + (l.info.site ? "Analyse de " + esc(l.info.site.replace(/^https?:\/\//i, "").replace(/\/$/, "")) + " et de son activité…" : "Recherche du site et de l'activité sur le web…") + "</div>";
+    var last = lastActivity(l), act = "";
+    if (last) act = '<div class="tsite"><span class="ok">Actif : dernière trace en ligne en ' + esc(monthYear(last)) + "</span></div>";
+    else if (l.wsearch && l.wsearch.v === 2) act = '<div class="tsite">Aucune date d\'activité trouvée en ligne : vérifie qu\'il est toujours ouvert</div>';
+    return siteOnlyHTML(l) + act;
+  }
+  function siteOnlyHTML(l) {
     var i = l.info, g = l.gsite, gs = '<a class="plain" href="' + esc(googleSearch(i)) + '" target="_blank" rel="noopener">Vérifier sur Google</a>';
-    if (verifying === l.id || verifyQueue.indexOf(l.id) >= 0) return '<div class="tsite">' + (i.site ? "Analyse du site " + esc(i.site.replace(/^https?:\/\//i, "").replace(/\/$/, "")) + "…" : "Recherche du site sur le web…") + "</div>";
     if (!i.site) {
       if (g && g.found) return '<div class="tsite"><span class="ok">Aucun site, confirmé par Google ✓</span> · <a class="plain" href="' + esc(g.maps) + '" target="_blank" rel="noopener">Fiche Google</a></div>';
       if (l.wsearch) return '<div class="tsite"><span class="ok">Aucun site trouvé sur le web ✓</span> · ' + gs + "</div>";
