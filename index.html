@@ -122,6 +122,12 @@ h1{font-size:clamp(28px,4.4vw,40px)}
 .trow .who span{display:block;color:var(--muted);font-size:13px}
 .trow .tsite{margin-top:2px;color:var(--muted);font-size:13px;overflow-wrap:anywhere}
 .trow .tsite a{font-family:var(--mono);font-size:12.5px}
+.trow .tsite a.plain{font-family:var(--body);font-size:13px}
+.trow .tsite .ok{color:var(--ok);font-weight:600}
+.trow .flaws{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
+.dropped{margin-top:14px;padding:10px 14px;font-size:13px;color:var(--muted)}
+.dropped b{color:var(--ink)}
+.dropped ul{margin:4px 0 0;padding-left:18px}
 .trow.sent{opacity:.6}
 .btn-wa{background:var(--ok);border-color:var(--ok);color:#fff;min-height:44px;padding:8px 18px;font-size:15px}
 .btn-wa:hover{border-color:var(--ok);filter:brightness(1.08)}
@@ -212,9 +218,10 @@ h1{font-size:clamp(28px,4.4vw,40px)}
   <div class="more"><button class="btn" id="moreBtn" type="button" hidden>Afficher plus</button></div>
 
   <details class="panel key" id="keyBox">
-    <summary>Notation automatique des sites (facultatif)</summary>
-    <p>Avec une clé gratuite Google PageSpeed, l'application note elle-même chaque site : vitesse sur téléphone, adaptation au mobile, référencement. Sans clé, le bouton « Tester le site » ouvre l'analyse Google dans un nouvel onglet. La clé reste dans ce navigateur.</p>
-    <input id="psiKey" type="text" autocomplete="off" spellcheck="false" placeholder="Colle ta clé ici (commence par AIza…)" aria-label="Clé Google PageSpeed">
+    <summary>Clé Google : recherche des sites sur Google et notation</summary>
+    <p>Avec une clé Google, l'application cherche chaque commerce de la liste du jour sur Google Maps pour savoir s'il a déjà un site, puis analyse ce site (version mobile, mises à jour, design dépassé, vitesse). Sans clé, elle ne peut que deviner l'adresse du site à partir du nom.</p>
+    <p>Pour l'obtenir : sur console.cloud.google.com, crée un projet, active « Places API (New) » et « PageSpeed Insights API », puis crée une clé dans « Identifiants ». Google demande une carte bancaire, mais l'usage de l'app (15 commerces par jour) reste dans la partie gratuite. Conseil : limite la clé au site willouv33-star.github.io. La clé reste dans ce navigateur.</p>
+    <input id="psiKey" type="text" autocomplete="off" spellcheck="false" placeholder="Colle ta clé ici (commence par AIza…)" aria-label="Clé Google">
   </details>
   <p class="foot">« Sans site » veut dire qu'aucun site n'est indiqué sur OpenStreetMap : vérifie avec le lien Google avant d'appeler. Un numéro en 04… est un GSM, souvent sur WhatsApp, sans garantie. Tes suivis et tes notes restent dans ce navigateur, sur cet ordinateur. Données © les contributeurs d'OpenStreetMap (licence ODbL).</p>
 </div>
@@ -342,17 +349,23 @@ h1{font-size:clamp(28px,4.4vw,40px)}
     else if (LISTINGS.test(u)) f.push({ w: 3, t: "Pas de vrai site : une fiche d'annuaire" });
     else if (BUILDERS.test(u)) f.push({ w: 2, t: "Site gratuit (" + (u.match(BUILDERS)[1].replace(/\\/g, "").split(".")[0]) + ")" });
     if (/^http:\/\//i.test(u)) f.push({ w: 1, t: "Lien sans HTTPS (pas de cadenas)" });
+    var a = l.audit && l.audit.url === u ? l.audit : null;
+    /* Le lien est en http:// mais le site répond aussi en https:// : pas un vrai défaut. */
+    if (a && a.https) f = f.filter(function (x) { return x.t.indexOf("HTTPS") < 0; });
+    function add(w, t) { if (!f.some(function (x) { return x.t === t; })) f.push({ w: w, t: t }); }
+    if (a) a.flags.forEach(function (x) { add(x.w, x.t); });
     var p = l.psi;
     if (p && !p.error) {
-      if (p.mobile === 0) f.push({ w: 3, t: "Pas adapté au téléphone" });
-      if (p.perf != null && p.perf < 0.5) f.push({ w: 2, t: "Lent sur téléphone (" + Math.round(p.perf * 100) + "/100)" });
-      if (p.seo != null && p.seo < 0.8) f.push({ w: 1, t: "Mal référencé sur Google (" + Math.round(p.seo * 100) + "/100)" });
-      if (p.https === 0) f.push({ w: 2, t: "Pas sécurisé (HTTPS)" });
+      if (p.mobile === 0) add(3, "Pas adapté au téléphone");
+      if (p.perf != null && p.perf < 0.5) add(2, "Lent sur téléphone (" + Math.round(p.perf * 100) + "/100)");
+      if (p.seo != null && p.seo < 0.8) add(1, "Mal référencé sur Google (" + Math.round(p.seo * 100) + "/100)");
+      if (p.https === 0 && !(a && a.https)) add(2, "Pas sécurisé (HTTPS)");
     }
-    if (p && p.error) f.push({ w: 2, t: "Site injoignable lors du test" });
-    if (l.info.siteAuto && !f.length) f.push({ w: 0, t: "Site trouvé automatiquement : vérifie-le" });
-    return f;
+    if (p && p.error && !a) add(2, "Site injoignable lors du test");
+    if (l.info.siteAuto && !f.length && !a) f.push({ w: 0, t: "Site trouvé automatiquement : vérifie-le" });
+    return f.sort(function (x, y) { return y.w - x.w; });
   }
+  function auditHas(l, k) { return !!(l.audit && l.audit.url === l.info.site && l.audit.flags.some(function (x) { return x.k === k; })); }
   function siteScore(l) { return siteFlags(l).reduce(function (a, f) { return a + f.w; }, 0); }
   /* Fermé (définitivement ou temporairement) d'après OpenStreetMap. */
   var CLOSED_WORDS = /(ferm[ée]e? (d[ée]finitivement|temporairement|pour travaux)|definitief gesloten|tijdelijk gesloten|permanently closed|temporarily closed|\(ferm[ée]e?\)|\(closed\)|\bfailli)/i;
@@ -506,6 +519,7 @@ h1{font-size:clamp(28px,4.4vw,40px)}
       };
       /* « Nouveau » seulement si la commune avait déjà été scannée : le premier scan remplit la liste, il ne crée pas de nouveautés. */
       if (!lead) store.leads[id] = lead = { id: id, firstSeen: now, fresh: !!store.scans[zone.name], status: "nouveau", note: "" };
+      if (!info.site && lead.gsite && lead.gsite.site) { info.site = lead.gsite.site; info.siteAuto = true; info.siteSrc = "google"; }
       if (!info.site && lead.web && lead.web.found && lead.web.v === 2) { info.site = "https://" + lead.web.found; info.siteAuto = true; }
       lead.info = info;
       lead.lastSeen = now;
@@ -800,10 +814,14 @@ h1{font-size:clamp(28px,4.4vw,40px)}
     if (/(facebook\.com|fb\.me|instagram\.com|linktr\.ee)/i.test(u)) return "votre présence en ligne passe surtout par une page Facebook ou Instagram, qui ressort beaucoup moins bien sur Google qu'un vrai site";
     if (LISTINGS.test(u)) return "votre lien internet mène vers une fiche d'annuaire plutôt que vers votre propre site";
     var p = l.psi;
-    if (p && !p.error && p.mobile === 0) return "votre site s'affiche mal sur certains écrans";
+    if (auditHas(l, "dead")) return "votre site ne s'ouvre pas en ce moment, et les clients qui le cherchent tombent sur une erreur";
+    if (auditHas(l, "empty")) return "votre site semble en construction ou presque vide, et les clients n'y trouvent pas les informations qu'ils cherchent";
+    if (auditHas(l, "mobile") || (p && !p.error && p.mobile === 0)) return "votre site s'affiche mal sur téléphone, alors que la plupart des gens vous cherchent depuis leur GSM";
     if (p && !p.error && p.perf != null && p.perf < 0.5) return "votre site met du temps à s'ouvrir, et beaucoup de visiteurs partent avant qu'il soit chargé";
+    if (auditHas(l, "year")) return "votre site ne semble plus avoir été mis à jour depuis " + l.audit.year;
+    if (auditHas(l, "old")) return "le design de votre site a un peu vieilli par rapport à ce que les clients voient ailleurs aujourd'hui";
     if (BUILDERS.test(u)) return "votre site est fait sur une plateforme gratuite, ce qui donne souvent une adresse peu professionnelle et parfois de la publicité";
-    if (/^http:\/\//i.test(u)) return "votre site ne semble pas sécurisé (pas de cadenas dans la barre d'adresse), ce qui peut inquiéter certains visiteurs";
+    if (/^http:\/\//i.test(u) && !(l.audit && l.audit.https)) return "votre site ne semble pas sécurisé (pas de cadenas dans la barre d'adresse), ce qui peut inquiéter certains visiteurs";
     return "votre site pourrait être plus moderne et plus agréable à utiliser";
   }
   /* L'argument change selon le métier : on ne « se déplace » pas chez un plombier ou une société de nettoyage. */
@@ -930,7 +948,9 @@ h1{font-size:clamp(28px,4.4vw,40px)}
   }
   function waNum(l) { var p = l.info.c.phones.filter(function (x) { return x.mobile || x.wa; })[0]; return p && p.num; }
   function dailyOk(l, wd) {
-    return l.info && !l.gone && l.status === "nouveau" && waNum(l) && (!l.info.site || siteScore(l) > 0) && timingOf(l).days.indexOf(wd) >= 0;
+    /* Un site pas encore analysé peut entrer dans la liste : l'analyse dira s'il est à refaire. */
+    var pending = l.info && l.info.site && !(l.audit && l.audit.url === l.info.site);
+    return l.info && !l.gone && l.status === "nouveau" && waNum(l) && (!l.info.site || siteScore(l) > 0 || pending) && timingOf(l).days.indexOf(wd) >= 0;
   }
   function dailyList() {
     var d = targetDay(), key = dayKey(d), wd = d.getDay();
@@ -951,8 +971,120 @@ h1{font-size:clamp(28px,4.4vw,40px)}
     if (isToday) { var open = tm.slots.filter(function (s) { return mins < s[1]; })[0]; if (open) return open; }
     return tm.slots[0];
   }
+  /* ---------- Vérification des commerces de la liste du jour ----------
+     1. Sans site connu : on cherche le commerce sur Google (Places API, avec la clé de l'utilisateur) et on prend son site s'il en a un.
+     2. Avec un site : on lit la page et on repère ce qui fait vieux ou mal fait ; avec la clé, Google PageSpeed note aussi la vitesse.
+     Un commerce qui a déjà un site correct, ou fermé selon Google, sort de la liste et il est remplacé. Résultats gardés 30 jours. */
+  function metersBetween(a1, o1, a2, o2) {
+    var r = Math.PI / 180, x = (o2 - o1) * r * Math.cos((a1 + a2) / 2 * r), y = (a2 - a1) * r;
+    return Math.sqrt(x * x + y * y) * 6371000;
+  }
+  function placeMatches(l, p) {
+    var i = l.info;
+    if (i.lat && i.lon && p.location && metersBetween(+i.lat, +i.lon, p.location.latitude, p.location.longitude) > 400) return false;
+    var theirs = slugWords((p.displayName && p.displayName.text) || "").join(" ");
+    var words = slugWords(i.name).filter(function (x) { return x.length > 2; }), sig = words.filter(function (x) { return !GENERIC_WORDS.test(x); });
+    if (!sig.length) sig = words;
+    return !sig.length || sig.some(function (x) { return theirs.indexOf(x) >= 0; });
+  }
+  function placesLookup(l) {
+    var i = l.info, body = { textQuery: i.name + " " + cityOf(i), languageCode: "fr", regionCode: "BE", pageSize: 5 };
+    if (i.lat && i.lon) body.locationBias = { circle: { center: { latitude: +i.lat, longitude: +i.lon }, radius: 500 } };
+    return fetch("https://places.googleapis.com/v1/places:searchText", {
+      method: "POST", body: JSON.stringify(body),
+      headers: { "Content-Type": "application/json", "X-Goog-Api-Key": psiKey(), "X-Goog-FieldMask": "places.displayName,places.websiteUri,places.location,places.businessStatus,places.googleMapsUri" }
+    }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); }).then(function (res) {
+      if (!res.ok) {
+        var err = new Error("Google refuse la recherche de sites avec ta clé : " + ((res.j && res.j.error && res.j.error.message) || "erreur").slice(0, 160));
+        err.key = true; throw err;
+      }
+      var best = ((res.j && res.j.places) || []).filter(function (p) { return placeMatches(l, p); })[0];
+      l.gsite = { at: Date.now(), found: !!best, site: (best && best.websiteUri) || "", closed: !!best && best.businessStatus === "CLOSED_PERMANENTLY", maps: (best && best.googleMapsUri) || "" };
+    });
+  }
+  /* Ce qui se voit dans le code d'une page : pas de version mobile, copyright ancien, technique des années 2000, page vide. */
+  function htmlFlags(html) {
+    var h = String(html).toLowerCase(), f = [], year = new Date().getFullYear(), y = 0;
+    var text = h.replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/g, " ").replace(/<[^>]+>/g, " ").replace(/&nbsp;|\s+/g, " ").trim();
+    if (text.length < 300 || /(en construction|under construction|coming soon|bient[oô]t disponible|site en maintenance|domain is for sale|domaine est [aà] vendre|this domain may be for sale)/.test(text)) f.push({ k: "empty", w: 3, t: "Site en construction ou presque vide" });
+    if (!/<meta[^>]+name=["']?viewport/.test(h)) f.push({ k: "mobile", w: 3, t: "Pas adapté au téléphone" });
+    (text.match(/(©|&copy;|copyright)\s*((19|20)\d{2}\s*[-–]\s*)?(19|20)\d{2}/g) || []).forEach(function (m) { y = Math.max(y, +m.slice(-4)); });
+    if (y && y <= year - 3) f.push({ k: "year", w: 2, t: "Pas mis à jour depuis " + y });
+    var gen = /<meta[^>]*generator[^>]*>/.exec(h), g = gen ? ((/content=["']([^"']*)/.exec(gen[0]) || [])[1] || "") : "";
+    if (/<(font|marquee|frameset|center)[\s>]|\.swf\b|bgcolor=|<table[^>]+(width|border|cellpadding)=/.test(h) || /frontpage|dreamweaver|iweb|joomla! [12]\.|wordpress [1-4]\./.test(g)) f.push({ k: "old", w: 2, t: "Design dépassé (technique des années 2000)" });
+    return { flags: f, year: y };
+  }
+  function auditSite(l) {
+    var site = l.info.site, url = siteHref(site);
+    if (/(facebook\.com|fb\.me|instagram\.com|linktr\.ee)/i.test(url) || LISTINGS.test(url)) { l.audit = { url: site, at: Date.now(), flags: [] }; return Promise.resolve(); }
+    /* Un lien en http:// : on regarde si le site répond aussi en https://. */
+    var https = /^https:/i.test(url) ? Promise.resolve(true) : fetchWithTimeout(url.replace(/^http:/i, "https:"), 8000).then(function () { return true; }, function () { return false; });
+    https = https.catch(function () { return false; });
+    var page = fetch("https://r.jina.ai/" + url, { headers: { "X-Return-Format": "html" } }).then(function (r) {
+      if (r.status === 429 || r.status >= 500) throw new Error("lecteur saturé");
+      return r.ok ? r.text() : null;
+    });
+    return Promise.all([page, https]).then(function (res) {
+      var a = res[0] == null ? { flags: [{ k: "dead", w: 3, t: "Site injoignable" }], year: 0 } : htmlFlags(res[0]);
+      l.audit = { url: site, at: Date.now(), flags: a.flags, year: a.year, https: res[1] };
+    });
+  }
+  function needsVerify(l) {
+    if (!l || !l.info || l.status !== "nouveau" || (l.verifyFail && Date.now() - l.verifyFail < 10 * 60 * 1000)) return false;
+    if (!l.info.site) return !!psiKey() && !(l.gsite && Date.now() - l.gsite.at < 30 * DAY);
+    return !(l.audit && l.audit.url === l.info.site && Date.now() - l.audit.at < 30 * DAY);
+  }
+  var verifyQueue = [], verifying = "", keyWarned = false;
+  function verifyDaily(ids) {
+    ids.forEach(function (id) { if (!store.daily.sent[id] && verifyQueue.indexOf(id) < 0 && needsVerify(store.leads[id])) verifyQueue.push(id); });
+    verifyNext();
+  }
+  function dropFromDaily(l, why) {
+    var D = store.daily; if (!D) return;
+    D.dropped = (D.dropped || []).filter(function (x) { return x.id !== l.id; }).concat([{ id: l.id, why: why }]);
+  }
+  function verifyNext() {
+    if (verifying || !verifyQueue.length) return;
+    var l = store.leads[verifyQueue.shift()];
+    if (!needsVerify(l)) return verifyNext();
+    verifying = l.id;
+    var site = Promise.resolve();
+    if (!l.info.site && psiKey()) site = placesLookup(l).then(function () {
+      if (l.gsite.closed) { l.status = "ferme"; l.auto = "Fermé définitivement selon Google"; dropFromDaily(l, "fermé définitivement selon Google"); }
+      else if (l.gsite.site) { l.info.site = l.gsite.site; l.info.siteAuto = true; l.info.siteSrc = "google"; }
+    });
+    site.then(function () {
+      if (!l.info.site || l.status !== "nouveau") return;
+      return auditSite(l).then(function () {
+        var u = siteHref(l.info.site);
+        if (psiKey() && !l.psi && !auditHas(l, "dead") && !/(facebook\.com|fb\.me|instagram\.com|linktr\.ee)/i.test(u) && !LISTINGS.test(u)) return psi(l).catch(function () { /* PageSpeed pas activé sur la clé : on s'en passe */ });
+      }).then(function () {
+        if (!siteScore(l)) { l.status = "asite"; l.auto = "A déjà un site correct (vérifié automatiquement)"; dropFromDaily(l, "a déjà un site correct"); }
+      });
+    }).catch(function (err) {
+      if (err && err.key) { verifyQueue = []; if (!keyWarned) { keyWarned = true; toast(err.message); } }
+      else l.verifyFail = Date.now();
+    }).then(function () {
+      verifying = ""; save();
+      if (tab === "today") render();
+      setTimeout(verifyNext, 300);
+    });
+  }
+  function siteLineHTML(l) {
+    var i = l.info, g = l.gsite, gs = '<a class="plain" href="' + esc(googleSearch(i)) + '" target="_blank" rel="noopener">Vérifier sur Google</a>';
+    if (verifying === l.id || verifyQueue.indexOf(l.id) >= 0) return '<div class="tsite">' + (i.site ? "Analyse du site " + esc(i.site.replace(/^https?:\/\//i, "").replace(/\/$/, "")) + "…" : "Recherche du site sur Google…") + "</div>";
+    if (!i.site) {
+      if (g && g.found) return '<div class="tsite"><span class="ok">Aucun site, confirmé par Google ✓</span> · <a class="plain" href="' + esc(g.maps) + '" target="_blank" rel="noopener">Fiche Google</a></div>';
+      if (g) return '<div class="tsite">Pas de site connu · introuvable sur Google Maps · ' + gs + "</div>";
+      return '<div class="tsite">Pas de site connu · ' + gs + "</div>";
+    }
+    var flags = siteFlags(l).filter(function (f) { return f.w > 0; });
+    return '<div class="tsite">Site actuel : <a href="' + esc(siteHref(i.site)) + '" target="_blank" rel="noopener">' + esc(i.site.replace(/^https?:\/\//i, "").replace(/\/$/, "")) + "</a>" + (i.siteSrc === "google" ? " <small>(trouvé sur Google)</small>" : i.siteAuto ? " <small>(trouvé automatiquement)</small>" : "") + "</div>" +
+      (flags.length ? '<div class="flaws">' + flags.map(function (f) { return '<span class="pill flaw">' + esc(f.t) + "</span>"; }).join("") + "</div>" : "");
+  }
   function renderToday() {
     var D = dailyList(), isToday = D.today, n = bxNow(), mins = n.getHours() * 60 + n.getMinutes();
+    verifyDaily(D.ids);
     var leads = D.ids.map(function (id) { return store.leads[id]; });
     var groups = {};
     leads.forEach(function (l) { var s = slotFor(l, isToday), k = s[0] + "-" + s[1]; (groups[k] = groups[k] || { s: s, items: [] }).items.push(l); });
@@ -963,21 +1095,23 @@ h1{font-size:clamp(28px,4.4vw,40px)}
     else if (!isToday) warn = "Pas de prospection le week-end ni le dimanche : voici la liste du prochain jour ouvrable.";
     var html = '<div class="panel today-head"><div><h2>' + esc(label) + "</h2><p>" + leads.length + " commerces à contacter · " + sentN + " envoyé" + (sentN > 1 ? "s" : "") + " · un clic ouvre WhatsApp avec le message prêt, le second l'envoie</p></div></div>";
     if (warn) html += '<p class="today-warn" role="status" style="margin-top:10px">' + esc(warn) + "</p>";
+    if (!psiKey()) html += '<p class="today-warn" style="margin-top:10px">Ajoute ta clé Google en bas de la page : l\'app cherchera elle-même sur Google si chaque commerce a déjà un site, et si ce site est à refaire.</p>';
     if (!leads.length) html += '<div class="panel empty" style="margin-top:10px"><h2>Rien à envoyer pour l\'instant</h2><p>Tous les commerces avec un GSM ont déjà été contactés, ou le scan n\'est pas terminé. Coche d\'autres communes et lance un scan pour en trouver de nouveaux.</p></div>';
     Object.keys(groups).sort(function (a, b) { return groups[a].s[0] - groups[b].s[0]; }).forEach(function (k) {
       var g = groups[k], live = isToday && mins >= g.s[0] && mins < g.s[1], past = isToday && mins >= g.s[1];
       html += '<div class="slot"><h3>' + hm(g.s[0]) + "–" + hm(g.s[1]) + (live ? ' <span class="pill now">C\'est le moment</span>' : past ? ' <span class="pill">Créneau passé, envoie quand tu peux</span>' : "") + "</h3>" +
         g.items.map(function (l) {
           var i = l.info, sent = D.sent[l.id], num = waNum(l);
-          /* Le site actuel, pour le voir avant d'envoyer ; sans site connu, un lien pour vérifier sur Google. */
-          var siteLine = i.site
-            ? '<div class="tsite">Site actuel : <a href="' + esc(siteHref(i.site)) + '" target="_blank" rel="noopener">' + esc(i.site.replace(/^https?:\/\//i, "").replace(/\/$/, "")) + "</a>" + (i.siteAuto ? " <small>(trouvé automatiquement)</small>" : "") + "</div>"
-            : '<div class="tsite">Pas de site connu · <a href="' + esc(googleSearch(i)) + '" target="_blank" rel="noopener">Vérifier sur Google</a></div>';
-          return '<div class="panel trow' + (sent ? " sent" : "") + '"><div class="who"><b>' + esc(i.name) + "</b><span>" + esc(i.kind) + " · " + esc(i.zone) + (i.site ? " · site à refaire" : "") + " · " + esc(prettyPhone(num || "")) + "</span>" + siteLine + "</div>" +
+          return '<div class="panel trow' + (sent ? " sent" : "") + '"><div class="who"><b>' + esc(i.name) + "</b><span>" + esc(i.kind) + " · " + esc(i.zone) + " · " + esc(prettyPhone(num || "")) + "</span>" + siteLineHTML(l) + "</div>" +
             (sent ? '<span class="done">Envoyé ✓ ' + esc(sent) + "</span>" : "") +
             '<a class="btn btn-wa" href="' + esc(waHref(l, num)) + '" data-wa="' + esc(l.id) + '" data-num="' + esc(num) + '" target="radar_wa" rel="noopener">' + (sent ? "Rouvrir WhatsApp" : "Envoyer sur WhatsApp") + "</a></div>";
         }).join("") + "</div>";
     });
+    var dropped = (store.daily.dropped || []).filter(function (x) { return store.leads[x.id] && store.leads[x.id].info; });
+    if (dropped.length) html += '<div class="panel dropped"><b>Retirés de la liste et remplacés</b><ul>' + dropped.map(function (x) {
+      var i = store.leads[x.id].info;
+      return "<li>" + esc(i.name) + " : " + esc(x.why) + (i.site ? ' · <a href="' + esc(siteHref(i.site)) + '" target="_blank" rel="noopener">' + esc(i.site.replace(/^https?:\/\//i, "").replace(/\/$/, "")) + "</a>" : "") + "</li>";
+    }).join("") + "</ul></div>";
     $("list").innerHTML = html;
   }
   /* Au clic : message recalculé (bonjour/bonsoir selon l'heure) et commerce noté « Contacté ». */
@@ -1051,9 +1185,11 @@ h1{font-size:clamp(28px,4.4vw,40px)}
   /* ---------- Notation Google PageSpeed (avec la clé de l'utilisateur) ---------- */
   function psiKey() { try { return localStorage.getItem(KEY + ".psikey") || ""; } catch (e) { return ""; } }
   $("psiKey").value = psiKey();
+  if (!psiKey()) $("keyBox").open = true;
   $("psiKey").addEventListener("change", function () {
     try { localStorage.setItem(KEY + ".psikey", $("psiKey").value.trim()); } catch (e) { /* rien */ }
-    toast($("psiKey").value.trim() ? "Clé enregistrée : le bouton « Noter automatiquement » apparaît sur les sites." : "Clé retirée."); render();
+    keyWarned = false;
+    toast($("psiKey").value.trim() ? "Clé enregistrée : la liste du jour va être vérifiée sur Google." : "Clé retirée."); render();
   });
   function psi(l) {
     var url = "https://www.googleapis.com/pagespeedonline/v5/runPagespeed?strategy=mobile&category=performance&category=seo&key=" + encodeURIComponent(psiKey()) + "&url=" + encodeURIComponent(siteHref(l.info.site));
