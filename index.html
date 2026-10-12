@@ -124,6 +124,9 @@ h1{font-size:clamp(28px,4.4vw,40px)}
 .trow .tsite a{font-family:var(--mono);font-size:12.5px}
 .trow .tsite a.plain{font-family:var(--body);font-size:13px}
 .trow .tsite .ok{color:var(--ok);font-weight:600}
+.trow .tsite b.v3{color:var(--ok)}
+.trow .tsite b.v2{color:var(--ink)}
+.today-note{margin:10px 0 0;color:var(--muted);font-size:13.5px}
 .trow .flaws{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
 .dropped{margin-top:14px;padding:10px 14px;font-size:13px;color:var(--muted)}
 .dropped b{color:var(--ink)}
@@ -738,7 +741,7 @@ h1{font-size:clamp(28px,4.4vw,40px)}
     }).sort(function (a, b) {
       var order = { interesse: 0, contacte: 1, nouveau: 2, refus: 3, asite: 4, ferme: 5 };
       /* Priorité : déjà en discussion, puis WhatsApp, puis e-mail, puis les plus récents. */
-      return (order[a.status] - order[b.status]) || (tab === "site" || tab === "sitewa" ? siteScore(b) - siteScore(a) : 0) || (hasWa(b) - hasWa(a)) || (hasMail(b) - hasMail(a)) || (b.firstSeen - a.firstSeen) || a.info.name.localeCompare(b.info.name, "fr");
+      return (order[a.status] - order[b.status]) || (siteValue(b).s - siteValue(a).s) || (tab === "site" || tab === "sitewa" ? siteScore(b) - siteScore(a) : 0) || (hasWa(b) - hasWa(a)) || (hasMail(b) - hasMail(a)) || (b.firstSeen - a.firstSeen) || a.info.name.localeCompare(b.info.name, "fr");
     });
   }
 
@@ -757,7 +760,7 @@ h1{font-size:clamp(28px,4.4vw,40px)}
     return '<article class="panel lead' + (l.status === "refus" || l.status === "asite" || l.status === "ferme" ? " is-done" : "") + '" data-id="' + esc(l.id) + '">' +
       '<div class="lead-main">' +
         '<h2 class="lead-name">' + esc(i.name) + "</h2>" +
-        '<div class="meta"><span class="pill">' + esc(i.kind) + "</span><span data-addr=\"" + esc(l.id) + "\">" + addrText(l) + "</span><span>" + esc(i.zone) + "</span>" +
+        '<div class="meta"><span class="pill">' + esc(i.kind) + "</span>" + '<span class="pill' + (siteValue(l).s === 3 ? " now" : siteValue(l).s === 1 ? " gone" : "") + '" title="' + esc(siteValue(l).why) + '">Intérêt d\'un site : ' + VALUE_LABEL[siteValue(l).s] + "</span><span data-addr=\"" + esc(l.id) + "\">" + addrText(l) + "</span><span>" + esc(i.zone) + "</span>" +
           (isNew ? '<span class="pill new">Nouveau · ' + esc(ago(l.firstSeen)) + "</span>" : "") +
           (l.gone ? '<span class="pill gone">Plus sur la carte au dernier scan</span>' : "") +
           (l.auto ? '<span class="pill gone">' + esc(l.auto) + "</span>" : "") +
@@ -931,6 +934,32 @@ h1{font-size:clamp(28px,4.4vw,40px)}
   }
   function isFresh(l) { return !!l.fresh && Date.now() - l.firstSeen < 7 * DAY; }
 
+  /* ---------- Intérêt d'un site selon le métier : 3 fort, 2 moyen, 1 faible (écarté de la liste du jour) ---------- */
+  var VALUE = {};
+  function setValue(s, why, types) { types.split(" ").forEach(function (t) { VALUE[t] = { s: s, why: why }; }); }
+  setValue(3, "les clients comparent les prestations et prennent rendez-vous en ligne", "hairdresser beauty nails massage tattoo cosmetics pet_grooming");
+  setValue(3, "les gens regardent la carte et les photos, puis réservent en ligne", "restaurant");
+  setValue(3, "les voyageurs réservent après avoir vu les photos et les prix en ligne", "hotel guest_house apartment hostel");
+  setValue(3, "les patients cherchent un praticien, ses soins et ses horaires sur Google", "dentist veterinary physiotherapist psychotherapist alternative podiatrist speech_therapist dietitian optometrist nurse midwife therapist optician hearing_aids");
+  setValue(3, "on cherche un artisan sur Google et on compare ses réalisations avant d'appeler", "carpenter electrician plumber painter gardener roofer builder locksmith tiler glaziery stonemason upholsterer hvac window_construction cleaning");
+  setValue(3, "on compare les prestataires en ligne avant de les contacter", "accountant lawyer notary architect insurance it consulting tax_advisor financial estate_agent travel_agency travel_agent company photo photographer caterer funeral_directors");
+  setValue(3, "on compare les horaires, les cours et les tarifs en ligne avant de s'inscrire", "driving_school childcare kindergarten fitness_centre sports_centre dance");
+  setValue(3, "achat réfléchi : les clients regardent ce qui est proposé en ligne avant de se déplacer", "furniture interior_decoration kitchen bathroom_furnishing bed garden_centre car car_repair tyres bicycle jewelry art frame music wedding_dress bridal curtain flooring");
+  setValue(2, "un site aide à montrer les produits, les horaires et à se faire trouver", "clothes shoes gift books toys sports florist chocolate pastry confectionery deli wine cheese tea coffee second_hand computer mobile_phone electronics farm cafe bar pub copyshop tailor shoemaker fabric perfumery boutique bag watches");
+  setValue(1, "commerce de quartier : les clients viennent par habitude, un site leur apporte peu", "butcher bakery convenience supermarket greengrocer seafood newsagent kiosk variety_store alcohol beverages frozen_food laundry dry_cleaning fast_food ice_cream lottery money_lender pawnbroker");
+  setValue(1, "publicité et vente en ligne interdites en Belgique pour ce produit", "e-cigarette tobacco");
+  setValue(1, "la publicité des pharmacies est très encadrée et les clients vont au plus proche", "pharmacy chemist");
+  var LOW_NAMES = /(boucherie|beenhouwer|slagerij|boulangerie|bakkerij|friterie|frituur|snack|night ?shop|epicerie|alimentation generale|tabac|librairie[ -]presse|lavoir|wassalon|pressing|vape|cigarette electronique)/;
+  function siteValue(l) {
+    var t = l.info.rawType || "", v = VALUE[t];
+    if (LOW_NAMES.test(normTxt(l.info.name)) && !(v && v.s === 3)) return /vape|cigarette|tabac/.test(normTxt(l.info.name)) ? VALUE.tobacco : VALUE.butcher;
+    if (v) return v;
+    if (AT_HOME.test(t)) return VALUE.plumber;
+    var s = { resto: 2, shop: 2, beauty: 3, health: 3, craft: 3, office: 3, stay: 3, sport: 3 }[l.info.group] || 2;
+    return s === 3 ? { s: 3, why: "les clients comparent en ligne avant de choisir" } : VALUE.clothes;
+  }
+  var VALUE_LABEL = { 3: "fort", 2: "moyen", 1: "faible" };
+
   /* ---------- Liste du jour : au moins 30 WhatsApp à envoyer, rangés par meilleure heure ---------- */
   var DAILY_N = 30;
   function bxNow() { return new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Brussels" })); }
@@ -951,7 +980,7 @@ h1{font-size:clamp(28px,4.4vw,40px)}
   function dailyOk(l, wd) {
     /* Un site pas encore analysé peut entrer dans la liste : l'analyse dira s'il est à refaire. */
     var pending = l.info && l.info.site && !(l.audit && l.audit.url === l.info.site);
-    return l.info && !l.gone && l.status === "nouveau" && waNum(l) && !isStale(l) && (!l.info.site || siteScore(l) > 0 || pending) && (wd == null || timingOf(l).days.indexOf(wd) >= 0);
+    return l.info && !l.gone && l.status === "nouveau" && waNum(l) && !isStale(l) && siteValue(l).s >= 2 && (!l.info.site || siteScore(l) > 0 || pending) && (wd == null || timingOf(l).days.indexOf(wd) >= 0);
   }
   function dailyList() {
     var d = targetDay(), key = dayKey(d), wd = d.getDay();
@@ -964,7 +993,7 @@ h1{font-size:clamp(28px,4.4vw,40px)}
       if (D.ids.length >= DAILY_N) return;
       var taken = {}; D.ids.forEach(function (id) { taken[id] = 1; });
       var pool = Object.keys(store.leads).map(function (id) { return store.leads[id]; }).filter(function (l) { return !taken[l.id] && dailyOk(l, day); })
-        .sort(function (a, b) { return (!!a.info.site - !!b.info.site) || (isFresh(b) - isFresh(a)) || (siteScore(b) - siteScore(a)) || (b.firstSeen - a.firstSeen); });
+        .sort(function (a, b) { return (siteValue(b).s - siteValue(a).s) || (!!a.info.site - !!b.info.site) || (isFresh(b) - isFresh(a)) || (siteScore(b) - siteScore(a)) || (b.firstSeen - a.firstSeen); });
       pool.slice(0, DAILY_N - D.ids.length).forEach(function (l) { D.ids.push(l.id); });
     });
     return { date: d, today: key === dayKey(bxNow()), ids: D.ids, sent: D.sent };
@@ -1190,13 +1219,20 @@ h1{font-size:clamp(28px,4.4vw,40px)}
     else if (!isToday) warn = "Pas de prospection le week-end ni le dimanche : voici la liste du prochain jour ouvrable.";
     var html = '<div class="panel today-head"><div><h2>' + esc(label) + "</h2><p>" + leads.length + " commerces à contacter · " + sentN + " envoyé" + (sentN > 1 ? "s" : "") + " · un clic ouvre WhatsApp avec le message prêt, le second l'envoie</p></div></div>";
     if (warn) html += '<p class="today-warn" role="status" style="margin-top:10px">' + esc(warn) + "</p>";
+    var low = Object.keys(store.leads).map(function (id) { return store.leads[id]; }).filter(function (l) { return l.info && !l.gone && l.status === "nouveau" && waNum(l) && siteValue(l).s < 2; });
+    if (low.length) {
+      var kinds = {}; low.forEach(function (l) { kinds[l.info.kind] = (kinds[l.info.kind] || 0) + 1; });
+      var top = Object.keys(kinds).sort(function (a, b) { return kinds[b] - kinds[a]; }).slice(0, 4).map(function (k) { return k.toLowerCase(); });
+      html += '<p class="today-note">' + low.length + " commerce" + (low.length > 1 ? "s écartés" : " écarté") + " parce qu'un site leur apporterait peu (" + esc(top.join(", ")) + "…). Ils restent dans les autres onglets.</p>";
+    }
     if (!leads.length) html += '<div class="panel empty" style="margin-top:10px"><h2>Rien à envoyer pour l\'instant</h2><p>Tous les commerces avec un GSM ont déjà été contactés, ou le scan n\'est pas terminé. Coche d\'autres communes et lance un scan pour en trouver de nouveaux.</p></div>';
     Object.keys(groups).sort(function (a, b) { return groups[a].s[0] - groups[b].s[0]; }).forEach(function (k) {
       var g = groups[k], live = isToday && mins >= g.s[0] && mins < g.s[1], past = isToday && mins >= g.s[1];
       html += '<div class="slot"><h3>' + hm(g.s[0]) + "–" + hm(g.s[1]) + (live ? ' <span class="pill now">C\'est le moment</span>' : past ? ' <span class="pill">Créneau passé, envoie quand tu peux</span>' : "") + "</h3>" +
         g.items.map(function (l) {
           var i = l.info, sent = D.sent[l.id], num = waNum(l);
-          return '<div class="panel trow' + (sent ? " sent" : "") + '"><div class="who"><b>' + esc(i.name) + "</b><span>" + esc(i.kind) + " · " + esc(i.zone) + " · " + esc(prettyPhone(num || "")) + "</span>" + siteLineHTML(l) + "</div>" +
+          return '<div class="panel trow' + (sent ? " sent" : "") + '"><div class="who"><b>' + esc(i.name) + "</b><span>" + esc(i.kind) + " · " + esc(i.zone) + " · " + esc(prettyPhone(num || "")) + "</span>" +
+            '<div class="tsite">Intérêt d\'un site : <b class="v' + siteValue(l).s + '">' + VALUE_LABEL[siteValue(l).s] + "</b> · " + esc(siteValue(l).why) + "</div>" + siteLineHTML(l) + "</div>" +
             (sent ? '<span class="done">Envoyé ✓ ' + esc(sent) + "</span>" : "") +
             '<a class="btn btn-wa" href="' + esc(waHref(l, num)) + '" data-wa="' + esc(l.id) + '" data-num="' + esc(num) + '" target="radar_wa" rel="noopener">' + (sent ? "Rouvrir WhatsApp" : "Envoyer sur WhatsApp") + "</a></div>";
         }).join("") + "</div>";
